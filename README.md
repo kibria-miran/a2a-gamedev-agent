@@ -10,9 +10,11 @@ A2A negotiation demo (`pr=a2a-demo===done`), applied to generative game dev.
 
 Current status: **v1.1 freeze candidate, Phase 1 (vertical slice) in progress.**
 In this tree: harness contract (§8.11, E-64/E-65/E-74), sandbox (E-69/E-70/E-73/E-74),
-config constants and the E-72 categorical tables, and the standalone Coder
-(E-13/E-50/E-68) with the compile-and-fix loop. Reference games and the
-vertical-slice test land in the next steps (revised §12).
+config constants and the E-72 categorical tables, the standalone Coder
+(E-13/E-50/E-68) with the compile-and-fix loop, and the hand-written reference
+invaders (`evals/reference_games/invaders/main.cpp`), which builds with
+`-Werror` and passes the determinism gate. Phase 1 steps 4 done; the
+vertical-slice test and `src/builder_demo` (step 5) land next.
 
 Remote: https://github.com/kibria-miran/a2a-gamedev-agent
 
