@@ -13,6 +13,111 @@ knobs (``HARNESS_*``) in ``src/harness/harness.c``.
 from __future__ import annotations
 
 import os
+from typing import Any
+
+# ---------------------------------------------------------------------------
+# A2A protocol pin (see docs/A2A_PIN.md; same architecture as the demo)
+# ---------------------------------------------------------------------------
+
+A2A_SPEC_VERSION = "1.0.0"
+A2A_PROTOCOL_VERSION = "1.0"
+A2A_VERSION_HEADER = "A2A-Version"
+
+AGENT_CARD_PATH = "/.well-known/agent-card.json"
+AGENT_CARD_ALIAS_PATH = "/.well-known/agent.json"
+A2A_RPC_PATH = "/"
+
+A2A_METHOD_SEND = "SendMessage"
+A2A_METHOD_GET_TASK = "GetTask"
+A2A_METHOD_CANCEL_TASK = "CancelTask"
+A2A_METHODS = frozenset({A2A_METHOD_SEND, A2A_METHOD_GET_TASK, A2A_METHOD_CANCEL_TASK})
+
+# Standard JSON-RPC 2.0 error codes.
+JSONRPC_PARSE_ERROR = -32700
+JSONRPC_INVALID_REQUEST = -32600
+JSONRPC_METHOD_NOT_FOUND = -32601
+JSONRPC_INVALID_PARAMS = -32602
+JSONRPC_INTERNAL_ERROR = -32603
+
+# A2A-specific error codes (spec section 5.4; R20 shares TASK_NOT_FOUND's -32001).
+A2A_TASK_NOT_FOUND = -32001
+A2A_TASK_NOT_CANCELABLE = -32002
+A2A_PUSH_NOTIFICATION_NOT_SUPPORTED = -32003
+A2A_UNSUPPORTED_OPERATION = -32004
+A2A_CONTENT_TYPE_NOT_SUPPORTED = -32005
+A2A_INVALID_AGENT_RESPONSE = -32006
+A2A_EXTENDED_AGENT_CARD_NOT_CONFIGURED = -32007
+A2A_EXTENSION_SUPPORT_REQUIRED = -32008
+A2A_VERSION_NOT_SUPPORTED = -32009
+
+# Internal (database / state machine) names. Do not rename these without a
+# migration; the wire mapping below is the only place A2A spellings appear.
+TASK_STATES = (
+    "submitted",
+    "working",
+    "input-required",
+    "completed",
+    "canceled",
+    "failed",
+    "rejected",
+)
+TERMINAL_STATES = frozenset({"completed", "canceled", "failed", "rejected"})
+
+ROLES = ("user", "agent")
+
+A2A_STATE_BY_INTERNAL = {
+    "submitted": "TASK_STATE_SUBMITTED",
+    "working": "TASK_STATE_WORKING",
+    "input-required": "TASK_STATE_INPUT_REQUIRED",
+    "completed": "TASK_STATE_COMPLETED",
+    "canceled": "TASK_STATE_CANCELED",
+    "failed": "TASK_STATE_FAILED",
+    "rejected": "TASK_STATE_REJECTED",
+}
+INTERNAL_STATE_BY_A2A = {wire: internal for internal, wire in A2A_STATE_BY_INTERNAL.items()}
+
+A2A_ROLE_BY_INTERNAL = {"user": "ROLE_USER", "agent": "ROLE_AGENT"}
+INTERNAL_ROLE_BY_A2A = {wire: internal for internal, wire in A2A_ROLE_BY_INTERNAL.items()}
+
+# ---------------------------------------------------------------------------
+# Caps, limits, tolerance, storage
+# ---------------------------------------------------------------------------
+MAX_MESSAGE_BYTES = 16_384
+MAX_OPEN_TASKS = 20
+MAX_HISTORY_RESPONSE = 20
+MAX_RATIONALE_CHARS = 400
+
+SQLITE_BUSY_TIMEOUT_MS = 5_000
+TRACE_U_DECIMALS = 2
+TRACE_PATH = os.getenv("A2A_TRACE_PATH", "logs/trace.jsonl")
+CODER_DB_PATH = os.getenv("A2A_CODER_DB", "data/coder.db")
+
+# ---------------------------------------------------------------------------
+# Stable reason strings (tests reference these keys, never literals).
+# All <= 60 chars (E-29). R17-R20 arrive with v1.1 (E-66/E-70).
+# ---------------------------------------------------------------------------
+REASONS = {
+    "R4": "server busy",
+    "R6A": "messageId already used in a different task",
+    "R6D": "turn in progress for this message",
+    "R7": "task is terminal",
+    "R8": "task is busy",
+    "R9": "round mismatch",
+    "R10": "accept mismatch",
+    "RESUME_DRIFT": "resume round drift",
+    "R17": "spec_signed not from designer",
+    "R18": "build before spec_signed",
+    "R19": "accept not from critic or before signoff",
+    "R20": "artifact not found",
+}
+
+# ---------------------------------------------------------------------------
+# Agent roles and their bearer tokens (E-66/R17/R19: the server must know who
+# is who — messages are otherwise indistinguishable). Tokens come from the
+# environment; empty means "not configured" and the server must fail closed.
+# ---------------------------------------------------------------------------
+A2A_TOKEN_DESIGNER = os.getenv("A2A_TOKEN_DESIGNER", "")
+A2A_TOKEN_CRITIC = os.getenv("A2A_TOKEN_CRITIC", "")
 
 # ---------------------------------------------------------------------------
 # Compile toolchain (E-73)
