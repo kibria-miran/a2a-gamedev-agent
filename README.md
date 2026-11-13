@@ -9,21 +9,30 @@ A2A negotiation demo (`pr=a2a-demo===done`), applied to generative game dev.
 - **Critic** — reviews the built binary; the only role that can accept.
 
 Current status: **v1.1 freeze candidate, Phase 1 (vertical slice) in progress.**
-This tree contains the harness contract (§8.11, E-64/E-65/E-74) only; the A2A
-layer, sandbox, config, and evals land in later phases (revised §12).
+This tree contains the harness contract (§8.11, E-64/E-65/E-74), the Phase 0
+config constants (E-68/E-70/E-71/E-73) and the E-72 categorical lookup tables.
+The A2A layer, sandbox, reference games, and evals land in later phases
+(revised §12).
+
+Remote: https://github.com/kibria-miran/a2a-gamedev-agent
 
 ## Layout
 
 ```
 src/harness/harness.h   # the game contract — written by us, shipped to games
 src/harness/harness.c   # main(); tape/tty input; digest printing; watchdog
-tests/test_harness.py   # pins the contract (10-line tape, pty, FNV digests)
+src/config.py           # frozen constants: CPP flags, artifact caps, lattice,
+                        # BUILD_ONCE, categorical utility tables
+src/utility.py          # norm_categorical / validate_categorical (E-72)
+tests/test_harness.py   # pins the harness contract
+tests/test_config.py    # E-68/E-70/E-71/E-72/E-73 assertions
+tests/test_utility.py   # E-72 categorical lookup, all three tables
 ```
 
 ## Test
 
 ```bash
-python3 -m pytest tests/test_harness.py
+python3 -m pytest tests/
 ```
 
 Requires `cc` and `g++` (the harness is compiled into every game).
