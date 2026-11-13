@@ -1,0 +1,32 @@
+[project]
+name = "a2a-gamedev-agent"
+version = "0.1.0"
+description = "Three-agent A2A game dev team (Designer/Coder/Critic), built spec-first"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: real compiles and subprocesses that exceed the fast tier",
+    "live: one optional real NIM negotiation",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "conftest"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
