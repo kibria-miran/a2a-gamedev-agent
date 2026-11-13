@@ -1,7 +1,8 @@
 """Frozen configuration for the A2A game dev agent.
 
 Everything in this module is a constant. Private profile values never live
-here; see ``profiles/*.json``. No I/O happens at import time.
+here; see ``profiles/*.json``. No I/O happens at import time beyond reading
+environment variables (never writes, never touches the network).
 
 This file carries the E-71/E-72/E-73 constants from v1.1 and the Phase 0
 config additions. The A2A wire vocabulary and server constants land with
@@ -10,6 +11,8 @@ knobs (``HARNESS_*``) in ``src/harness/harness.c``.
 """
 
 from __future__ import annotations
+
+import os
 
 # ---------------------------------------------------------------------------
 # Compile toolchain (E-73)
@@ -91,3 +94,17 @@ CATEGORICAL_TABLES = {
     "win_condition": WIN_CONDITION_UTILITY,
     "reliability": RELIABILITY_UTILITY,
 }
+
+# ---------------------------------------------------------------------------
+# LLM / NIM (values come from the environment; never logged)
+# ---------------------------------------------------------------------------
+# Stdlib-only client (src/llm.py). NVIDIA NIM speaks OpenAI-compatible chat
+# completions; a real run needs NIM_MODEL and NVIDIA_API_KEY set.
+NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_MODEL = os.getenv("NIM_MODEL", "")
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+
+LLM_TIMEOUT = float(os.getenv("A2A_LLM_TIMEOUT", "60.0"))
+LLM_TEMPERATURE = 0.3
+LLM_MAX_TOKENS = 8_192  # a whole .cpp file comfortably fits; do not starve it
+
