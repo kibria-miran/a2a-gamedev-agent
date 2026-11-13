@@ -1,0 +1,9 @@
+{
+  "brief": "A tiny single-player space invaders clone: a horizontal ASCII field, a cannon the player slides along the bottom, rows of invaders that march side to side and drop a row when they reach the edge, one-tap firing, lives, score. Win by clearing every invader (or survive and score).",
+  "genre": "invaders",
+  "grid_w": 40,
+  "grid_h": 20,
+  "tick_ms": 100,
+  "enemy_count": 8,
+  "win_condition": "survive"
+}

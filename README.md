@@ -8,13 +8,11 @@ A2A negotiation demo (`pr=a2a-demo===done`), applied to generative game dev.
 - **Coder** — builds the game once the spec is signed; compile-and-fix loop.
 - **Critic** — reviews the built binary; the only role that can accept.
 
-Current status: **v1.1 freeze candidate, Phase 1 (vertical slice) in progress.**
-In this tree: harness contract (§8.11, E-64/E-65/E-74), sandbox (E-69/E-70/E-73/E-74),
-config constants and the E-72 categorical tables, the standalone Coder
-(E-13/E-50/E-68) with the compile-and-fix loop, and the hand-written reference
-invaders (`evals/reference_games/invaders/main.cpp`), which builds with
-`-Werror` and passes the determinism gate. Phase 1 steps 4 done; the
-vertical-slice test and `src/builder_demo` (step 5) land next.
+Current status: **v1.1 freeze candidate — Phase 1 (VERTICAL SLICE) COMPLETE.**
+No server, no A2A, no DB: `python -m src.builder_demo` builds the reference
+invaders from the reference brief and plays it through the harness. The A2A
+layer (server, client, state machine, decision table) lands in Phases 2–4 as
+a thin wrapper around this builder (revised §12).
 
 Remote: https://github.com/kibria-miran/a2a-gamedev-agent
 
@@ -45,6 +43,18 @@ python3 -m pytest tests/
 
 Requires `cc` and `g++` (the harness is compiled into every game).
 Uses only pytest; no venv needed yet.
+
+## The 3-minute demo
+
+```bash
+python3 -m src.builder_demo
+```
+
+Reads `evals/reference_brief.json`, builds a playable invaders binary, plays
+it through the harness on a scripted tape, and writes the binary to
+`data/invaders`. Without `NIM_MODEL`/`NVIDIA_API_KEY` set it uses the
+checked-in reference source as the codegen oracle; with them set, the Coder
+generates the game from the brief for real (still no server, no A2A, no DB).
 
 ## The harness in one paragraph
 
