@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS artifacts (
 # Designer (user role) and is deliberately NOT an agent type.
 _AGENT_TYPES = {"counter", "build", "walk_away"}
 
+# E-67: spec messages are the negotiation itself — offer/counter/spec_signed/
+# walk_away — and each commits +1 to tasks.round (spec message index). Build,
+# review/accept, and failed deliveries are not spec messages and commit +0.
+_SPEC_MESSAGE_TYPES = {"offer", "counter", "spec_signed", "walk_away"}
+
 
 class StoreError(Exception):
     pass
@@ -260,10 +265,11 @@ class Store:
     ) -> dict[str, Any]:
         """R14: store the incoming spec message, set round_at_turn_start, go working.
 
-        Does NOT change tasks.round (E-47). If the incoming parts carry a
+        The incoming message IS a spec message (E-67): tasks.round advances
+        by exactly 1 and round_at_turn_start keeps the pre-increment value
+        (needed by T8 recovery / RESUME_DRIFT). If the incoming parts carry a
         ``spec_signed`` data part, the spec_signed flag is set in the same
-        transaction (E-66) so R18/R19 become plain column reads. The flag is
-        sticky — once set it is never cleared by the store.
+        transaction (E-66). The flag is sticky — never cleared by the store.
         """
 
         with self.conn:
@@ -272,11 +278,14 @@ class Store:
                 raise StoreError("task not found")
             state_machine.transition(task["state"], "working")
             self._insert_message(task_id, message_id, "user", parts)
-            is_signoff = 1 if _part_type(parts) == "spec_signed" else 0
+            part_type = _part_type(parts)
+            is_signoff = 1 if part_type == "spec_signed" else 0
+            commits_round = 1 if part_type in _SPEC_MESSAGE_TYPES else 0
             self.conn.execute(
                 "UPDATE tasks SET state = 'working', round_at_turn_start = round,"
-                " spec_signed = MAX(spec_signed, ?), updated_at = ? WHERE id = ?",
-                (is_signoff, _now_iso(), task_id),
+                " round = round + ?, spec_signed = MAX(spec_signed, ?),"
+                " updated_at = ? WHERE id = ?",
+                (commits_round, is_signoff, _now_iso(), task_id),
             )
         updated = self.get_task(task_id)
         assert updated is not None
@@ -312,11 +321,12 @@ class Store:
         agent_parts: list[dict[str, Any]] | None = None,
         agreement_terms: dict[str, int] | None = None,
     ) -> bool:
-        """Compare-and-set the turn result (D-15, E-47).
+        """Compare-and-set the turn result (D-15, E-47, E-67).
 
-        ``sent_kind`` is counter, accept, walk_away, failed, spec_signed or
-        build. Only ``counter`` advances tasks.round (+2); everything else
-        advances by 0. ``spec_signed`` also sets the spec_signed flag (E-66).
+        Spec messages (counter, walk_away, spec_signed) advance tasks.round by
+        exactly 1 (E-67); build/accept/failed deliveries advance by 0. Round
+        checks for spec messages remain the server's job (R9). ``spec_signed``
+        also sets the spec_signed flag (E-66).
         """
 
         with self.conn:
@@ -325,17 +335,14 @@ class Store:
                 return False
             state_machine.transition("working", state)
 
-            start = task["round_at_turn_start"]
-            if start is None:
-                start = task["round"]
-
-            if sent_kind == "counter":
-                new_round = int(start) + 2
+            start = task["round"]
+            if sent_kind in {"counter", "walk_away", "spec_signed"}:
+                new_round = int(start) + 1
                 history = [float(v) for v in json.loads(task["own_utility_history"])]
                 if own_u is not None:
                     history.append(float(own_u))
                 history_json = json.dumps(history)
-            elif sent_kind in {"accept", "walk_away", "failed", "spec_signed", "build"}:
+            elif sent_kind in {"accept", "failed", "build"}:
                 new_round = int(start)
                 history_json = task["own_utility_history"]
             else:

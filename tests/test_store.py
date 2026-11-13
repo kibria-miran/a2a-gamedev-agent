@@ -85,13 +85,40 @@ def test_spec_signed_flag_is_sticky(store):
 # round accounting (E-47) and the build kind
 # ---------------------------------------------------------------------------
 
-def test_cas_commit_counter_advances_round_by_two(store):
+def test_begin_turn_commits_spec_message_plus_one(store):
+    task = store.create_task()
+    updated = store.begin_turn(task["id"], "msg-1", user_counter(0))
+    assert updated["round"] == 1
+    assert updated["round_at_turn_start"] == 0
+
+
+def test_parity_designer_even_coder_odd(store):
+    task = store.create_task()
+    # designer offer 1: arrives at round 0, stored, round -> 1
+    store.begin_turn(task["id"], "d-1", user_counter(0))
+    # coder counter: spec message, round -> 2
+    store.cas_commit(
+        task["id"], "input-required", "counter", agent_parts=agent_parts("counter", round=1)
+    )
+    assert store.get_task(task["id"])["round"] == 2
+    # designer offer 2: arrives at round 2, stored, round -> 3
+    store.begin_turn(task["id"], "d-2", user_counter(2))
+    assert store.get_task(task["id"])["round"] == 3
+    # coder counter 2: round -> 4
+    store.cas_commit(
+        task["id"], "input-required", "counter", agent_parts=agent_parts("counter", round=3)
+    )
+    assert store.get_task(task["id"])["round"] == 4
+
+
+def test_cas_commit_counter_advances_round_by_one(store):
     task = store.create_task()
     store.begin_turn(task["id"], "msg-1", user_counter(0))
     ok = store.cas_commit(
         task["id"], "input-required", "counter", agent_parts=agent_parts("counter", round=0)
     )
     assert ok
+    # begin_turn committed +1 (spec message), counter commits +1
     assert store.get_task(task["id"])["round"] == 2
 
 
@@ -104,7 +131,8 @@ def test_cas_commit_build_keeps_round(store):
     assert ok
     updated = store.get_task(task["id"])
     assert updated["state"] == "input-required"
-    assert updated["round"] == 0
+    # designer's spec_signed committed +1 (spec message), the build commits 0
+    assert updated["round"] == 1
     assert updated["spec_signed"] == 1
 
 
