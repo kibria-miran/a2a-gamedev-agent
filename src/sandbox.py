@@ -161,6 +161,8 @@ def probe_network_isolation() -> tuple[str, str | None]:
 
 def _isolated_argv(argv: list[str], backend: str, work_dir: Path | None = None) -> list[str] | None:
     if backend == "bwrap":
+        if BWRAP is None:
+            return None
         args = [
             BWRAP, "--unshare-net",
             "--ro-bind", "/", "/",     # read-only root fs
@@ -173,6 +175,8 @@ def _isolated_argv(argv: list[str], backend: str, work_dir: Path | None = None) 
             args += ["--bind", str(work_dir), str(work_dir)]
         return args + ["--", *argv]
     if backend == "unshare":
+        if UNSHARE is None:
+            return None
         return [UNSHARE, "-n", *argv]
     return None
 

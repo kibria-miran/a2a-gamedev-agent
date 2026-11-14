@@ -53,6 +53,7 @@ def main() -> int:
         return 1
 
     print(f"build  : OK  sha256={result.binary_sha256}")
+    assert result.binary_bytes is not None
     print(f"         binary {len(result.binary_bytes)} bytes\n")
 
     env = {"HARNESS_SPEC_JSON": canonical, "HARNESS_PLAY_TIMEOUT": "10"}
