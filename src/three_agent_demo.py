@@ -91,20 +91,26 @@ async def run_demo(
 
             from src.transport import accept_parts, message_dict, walk_away_parts
 
-            if decision.kind == "accept":
-                artifact = (decision.message or {}).get("artifact")
-                parts = accept_parts(decision.round, build=artifact)
+            if decision.kind in {"complete", "rejected", "canceled", "failed"}:
+                # The task is already terminal on the server (e.g. the build
+                # walk-away); there is nothing to send.
+                if verbose:
+                    print(f"critic  : task already {decision.kind}; nothing to send")
+                final = signed_view
+                binary, sha256 = b"", ""
             else:
-                parts = walk_away_parts(decision.round, decision.reason)
-            final = await critic.send_message(
-                message_dict(
-                    role="user", parts=parts, task_id=task_id,
-                    context_id=signed_view.get("contextId"),
+                if decision.kind == "accept":
+                    artifact = (decision.message or {}).get("artifact")
+                    parts = accept_parts(decision.round, build=artifact)
+                else:
+                    parts = walk_away_parts(decision.round, decision.reason)
+                final = await critic.send_message(
+                    message_dict(
+                        role="user", parts=parts, task_id=task_id,
+                        context_id=signed_view.get("contextId"),
+                    )
                 )
-            )
 
-            binary = b""
-            sha256 = ""
             artifact = history.build_artifact(final)
             if artifact is not None and decision.kind == "accept":
                 binary, sha256, _size = await critic.fetch_build(

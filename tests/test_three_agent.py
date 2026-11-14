@@ -46,3 +46,31 @@ async def test_s26_reference_brief_to_verified_playable_invaders():
     assert accept["type"] == "accept"
     assert accept["build"]["artifactId"] == artifact["artifactId"]
     assert accept["build"]["sha256"] == artifact["sha256"]
+
+
+async def test_s26_build_failure_terminal_task_does_not_crash(monkeypatch):
+    """Coder walks away after a failed build -> task already ``rejected``.
+
+    The Critic must not send into a terminal task (R7); the demo reports the
+    rejection instead of crashing.
+    """
+    from src import three_agent_demo
+    from src.coder_agent import make_responder
+
+    failure = sandbox.BuildResult(ok=False, violations=("compile: boom",), exit_code=1)
+
+    def fake_codegen(_spec):
+        return "int main(]]]", failure
+
+    monkeypatch.setattr(
+        three_agent_demo,
+        "make_responder",
+        lambda **kwargs: make_responder(**kwargs, codegen=fake_codegen),
+    )
+
+    result = await run_demo(db_path=":memory:", verbose=False)
+
+    assert result["decision"].kind == "rejected"
+    assert result["task"]["status"]["state"] == "TASK_STATE_REJECTED"
+    assert result["binary"] == b""
+    assert result["artifact"] is None
