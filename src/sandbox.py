@@ -28,6 +28,9 @@ Design (v1.1):
   - Children env is MINIMAL (PATH, HOME, HARNESS_*). The parent's
     environment — including NVIDIA_API_KEY — is never propagated into
     LLM-authored binaries.
+  - Output is capped (config.MAX_OUTPUT_BYTES): a game or compiler that
+    spams stdout/stderr is killed and the build/play fails, instead of
+    growing the parent's memory without bound.
   - Workdirs are mkdtemp'd under /var/tmp (never /tmp, so bwrap can
     re-bind them without shadowing) with mode 0700 and are removed after
     the call unless keep_workdir=True.
@@ -44,7 +47,9 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import threading
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -194,20 +199,89 @@ def _child_env(work_dir: Path, extra: dict[str, str] | None) -> dict[str, str]:
     return env
 
 
+class _CapturedProcess:
+    """Minimal CompletedProcess with an output-overflow flag."""
+
+    def __init__(self, returncode: int | None, stdout: bytes, stderr: bytes,
+                 output_overflow: bool) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.output_overflow = output_overflow
+
+
+def _drain_pipe(stream, limit: int, sink: list[bytes], overflow: threading.Event) -> None:
+    """Read a pipe into ``sink`` keeping at most ``limit`` bytes.
+
+    Excess bytes are discarded (not stored) so the child never blocks on a
+    full pipe, but the cap holds regardless of how much it writes.
+    """
+
+    buf = bytearray()
+    while True:
+        chunk = stream.read(65536)
+        if not chunk:
+            break
+        remaining = limit - len(buf)
+        if remaining > 0:
+            buf += chunk[:remaining]
+            if len(chunk) > remaining:
+                overflow.set()
+        else:
+            overflow.set()
+    sink.append(bytes(buf))
+
+
 def _run(argv: list[str], *, stdin: bytes | None = None, env: dict[str, str] | None = None,
          timeout: float, backend: str, work_dir: Path | None = None,
-         text: bool = False) -> subprocess.CompletedProcess:
+         text: bool = False) -> _CapturedProcess:
     wrapped = _isolated_argv(argv, backend, work_dir)
     if wrapped is None:
         raise RuntimeError("sandbox: no network isolation available")
-    return subprocess.run(
+
+    limit = config.MAX_OUTPUT_BYTES
+    proc = subprocess.Popen(
         wrapped,
-        input=stdin,
-        capture_output=True,
-        timeout=timeout,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         start_new_session=True,   # E-69: no preexec_fn, ever
         env=env,
-        text=text,
+    )
+    overflow = threading.Event()
+    stdout_sink: list[bytes] = []
+    stderr_sink: list[bytes] = []
+    threads = [
+        threading.Thread(target=_drain_pipe, args=(proc.stdout, limit, stdout_sink, overflow), daemon=True),
+        threading.Thread(target=_drain_pipe, args=(proc.stderr, limit, stderr_sink, overflow), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+
+    if stdin is not None:
+        assert proc.stdin is not None
+        with suppress(BrokenPipeError, OSError):
+            proc.stdin.write(stdin)
+    if proc.stdin is not None:
+        with suppress(OSError):
+            proc.stdin.close()
+
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        for thread in threads:
+            thread.join(timeout=5)
+        raise subprocess.TimeoutExpired(wrapped, timeout) from None
+    for thread in threads:
+        thread.join(timeout=10)
+
+    return _CapturedProcess(
+        returncode,
+        stdout_sink[0] if stdout_sink else b"",
+        stderr_sink[0] if stderr_sink else b"",
+        overflow.is_set(),
     )
 
 
@@ -319,6 +393,53 @@ def scan_determinism(sources: dict[str, str]) -> DeterminismScan:
     return DeterminismScan(violations=tuple(violations), nondeterministic_source=allowed)
 
 
+# Escape hatches an LLM-authored game never needs (S22 defense in depth):
+# process spawning, sockets, process introspection. Runtime isolation
+# (no-net, read-only fs, prlimit) is the primary defense; this static scan
+# fails the build before the compiler ever runs, so a violation costs nothing.
+_BANNED_CALLS = (
+    "system", "popen", "pclose",
+    "execl", "execlp", "execle", "execv", "execvp", "execve", "execvpe",
+    "posix_spawn", "posix_spawnp",
+    "fork", "vfork", "clone",
+    "socket", "connect", "bind", "listen", "accept", "accept4",
+    "ptrace",
+)
+_BANNED_CALL_RE = re.compile(r"\b(" + "|".join(_BANNED_CALLS) + r")\s*\(")
+
+
+_ALLOW_BANNED_MARKER = "// allow-banned-call"
+
+
+def scan_banned_calls(sources: dict[str, str]) -> tuple[str, ...]:
+    """Reject calls that spawn processes or touch the network (S22).
+
+    Static, deterministic, pre-compile. A game legitimately needing one of
+    these is refused — by design — unless the same line carries
+    ``// allow-banned-call`` AND the next line is a non-trivial reason
+    comment (the E-74 escape hatch, used by tests that must verify the
+    runtime isolation itself). The marker never appears in LLM-facing prompts.
+    """
+    violations: list[str] = []
+    for name, text in sources.items():
+        lines = text.splitlines()
+        for i, line in enumerate(lines, start=1):
+            match = _BANNED_CALL_RE.search(line)
+            if match is None:
+                continue
+            if _ALLOW_BANNED_MARKER in line:
+                next_line = lines[i] if i < len(lines) else ""
+                if _REASON_COMMENT_RE.match(next_line):
+                    continue
+                violations.append(
+                    f"sandbox_banned_call:{match.group(1)} at {name}:{i} "
+                    "(allow-banned-call without a reason comment on the next line)"
+                )
+                continue
+            violations.append(f"sandbox_banned_call:{match.group(1)} at {name}:{i}")
+    return tuple(violations)
+
+
 def _preflight(sources: dict[str, str]) -> tuple[tuple[str, ...], DeterminismScan]:
     violations: list[str] = []
     total = 0
@@ -331,6 +452,7 @@ def _preflight(sources: dict[str, str]) -> tuple[tuple[str, ...], DeterminismSca
     if total > config.MAX_ARTIFACT_BYTES:
         violations.append("source:total exceeds MAX_ARTIFACT_BYTES")
     violations.extend(check_harness_contract(sources))
+    violations.extend(scan_banned_calls(sources))
     det = scan_determinism(sources)
     violations.extend(det.violations)
     if not any(name.endswith((".cpp", ".cc", ".cxx")) for name in sources):
@@ -388,7 +510,7 @@ def build_game(
         flags = config.CPP_FLAGS_REFERENCE if reference else config.CPP_FLAGS_LLM
         env = _child_env(work_dir, None)
 
-        def run_step(argv: list[str]) -> subprocess.CompletedProcess:
+        def run_step(argv: list[str]) -> _CapturedProcess:
             return _run(
                 _prlimit_argv(COMPILE_MEM_BYTES, COMPILE_CPU_SECONDS, argv),
                 env=env,
@@ -417,6 +539,17 @@ def build_game(
                 proc = run_step(argv)
                 combined_out.append(proc.stdout.decode("utf-8", errors="replace") if isinstance(proc.stdout, bytes) else str(proc.stdout))
                 combined_err.append(proc.stderr.decode("utf-8", errors="replace") if isinstance(proc.stderr, bytes) else str(proc.stderr))
+                if proc.output_overflow:
+                    return BuildResult(
+                        ok=False,
+                        network_isolation=backend,
+                        exit_code=proc.returncode,
+                        stdout="".join(combined_out),
+                        stderr="".join(combined_err)[-6000:],
+                        violations=("output_overflow",),
+                        duration_s=time.monotonic() - started,
+                        work_dir=str(work_dir) if keep_workdir else "",
+                    )
                 if proc.returncode != 0:
                     return BuildResult(
                         ok=False,
@@ -513,6 +646,15 @@ def run_game(
                 backend=backend,
                 work_dir=work_dir,
             )
+            if proc.output_overflow:
+                return RunResult(
+                    network_isolation=backend,
+                    exit_code=None,
+                    stdout=proc.stdout,
+                    stderr=b"sandbox: game exceeded output cap (MAX_OUTPUT_BYTES)",
+                    duration_s=time.monotonic() - started,
+                    work_dir=str(work_dir) if keep_workdir else "",
+                )
             return RunResult(
                 network_isolation=backend,
                 exit_code=proc.returncode,

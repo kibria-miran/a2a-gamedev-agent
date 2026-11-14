@@ -173,6 +173,11 @@ TOKEN_BUDGET_PER_TASK = 15_000
 # A 600-line C++ game with -O2 is ~50 KB; 4 MiB is generous.
 MAX_ARTIFACT_BYTES = 4_194_304  # 4 MiB
 
+# Hard cap on bytes captured from any sandboxed child's stdout/stderr.
+# Idle/malicious games that spam output would otherwise grow the parent's
+# memory without bound (E-69 spirit). 4 MiB is far beyond any tape run.
+MAX_OUTPUT_BYTES = 4_194_304  # 4 MiB
+
 # The Critic's prompt receives at most this many evenly sampled frame-digest
 # lines, plus the final line and the exit code (§8.11).
 MAX_FRAME_DIGESTS_TO_LLM = 64
@@ -234,8 +239,8 @@ CATEGORICAL_TABLES = {
 # ---------------------------------------------------------------------------
 # Address of the Coder service (the card URL and clients derive from this)
 # ---------------------------------------------------------------------------
-CODER_HOST = "127.0.0.1"
-CODER_PORT = 8003
+CODER_HOST = os.getenv("A2A_CODER_HOST", "127.0.0.1")
+CODER_PORT = int(os.getenv("A2A_CODER_PORT", "8003"))
 CODER_URL = f"http://{CODER_HOST}:{CODER_PORT}"
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,9 @@
+{
+  "brief": "A sparse maze-chase arcade game: a player-controlled runner in a procedural maze collects dots while 2 hunter enemies patrol fixed patrol loops. Win by collecting every dot; keys move one cell per tick. This brief is intentionally hostile to both negotiators (lowest-value genre, tiny grid, few enemies, low-utility win condition) so the negotiation actually happens — used by the evals runner to exercise concession, not to model a desirable spec.",
+  "genre": "maze",
+  "grid_w": 24,
+  "grid_h": 12,
+  "tick_ms": 200,
+  "enemy_count": 2,
+  "win_condition": "score"
+}

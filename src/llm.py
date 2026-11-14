@@ -63,10 +63,11 @@ def chat(
     messages: list[dict[str, Any]],
     role: str = "coder",
     temperature: float = config.LLM_TEMPERATURE,
+    model: str | None = None,
 ) -> str:
     """Call the chat completions endpoint and return the raw content string."""
 
-    selected_model = config.NIM_MODEL
+    selected_model = model or config.NIM_MODEL
     if not selected_model:
         raise LLMError("NIM_MODEL is not configured")
     if not config.NVIDIA_API_KEY:
@@ -110,9 +111,21 @@ def chat(
     return content
 
 
-def default_chat() -> Any | None:
-    """The real client only when both a model and a key are configured."""
+def default_chat(model: str | None = None) -> Any | None:
+    """The real client only when a model and a key are configured.
 
-    if config.NIM_MODEL and config.NVIDIA_API_KEY:
-        return chat
-    return None
+    ``model`` overrides ``config.NIM_MODEL`` for this client instance (X5).
+    """
+
+    selected = model or config.NIM_MODEL
+    if not selected or not config.NVIDIA_API_KEY:
+        return None
+
+    def _chat(
+        messages: list[dict[str, Any]],
+        role: str = "coder",
+        temperature: float = config.LLM_TEMPERATURE,
+    ) -> str:
+        return chat(messages, role=role, temperature=temperature, model=selected)
+
+    return _chat

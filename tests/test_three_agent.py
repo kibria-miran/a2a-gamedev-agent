@@ -62,11 +62,11 @@ async def test_s26_build_failure_terminal_task_does_not_crash(monkeypatch):
     def fake_codegen(_spec):
         return "int main(]]]", failure
 
-    monkeypatch.setattr(
-        three_agent_demo,
-        "make_responder",
-        lambda **kwargs: make_responder(**kwargs, codegen=fake_codegen),
-    )
+    def fake_make_responder(**kwargs):
+        kwargs["codegen"] = fake_codegen
+        return make_responder(**kwargs)
+
+    monkeypatch.setattr(three_agent_demo, "make_responder", fake_make_responder)
 
     result = await run_demo(db_path=":memory:", verbose=False)
 

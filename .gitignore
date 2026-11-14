@@ -7,3 +7,7 @@ __pycache__/
 .env
 data/
 logs/
+
+# evals runner output (keep the directory, ignore the data)
+evals/results/*
+!evals/results/.gitkeep

@@ -8,15 +8,19 @@ A2A negotiation demo (`pr=a2a-demo===done`), applied to generative game dev.
 - **Coder** — builds the game once the spec is signed; compile-and-fix loop.
 - **Critic** — reviews the built binary; the only role that can accept.
 
-Status: **v1.1 — Phases 1–4 complete.** The full three-agent lifecycle runs
-end to end: `offer → counter → spec_signed → build (once) → R20 fetch+verify →
-critic accept → completed`. The service (agent card, JSON-RPC
-SendMessage/GetTask/CancelTask, R17–R21 guards, R20 binary/source routes)
-enforces one build per task via its own `spec_signed` state; the Designer and
-Coder negotiate from private utility profiles over a finite proposal lattice;
-only the Critic can accept, after fetching the binary and replaying a scripted
-tape. Without a model configured, the Coder falls back to the checked-in
-reference source as an offline codegen oracle.
+Status: **v1.1 complete — Phases 1–7 built and measured.** The full
+three-agent lifecycle runs end to end: `offer → counter → spec_signed →
+build (once) → R20 fetch+verify → critic accept → completed`. The service
+(agent card, JSON-RPC SendMessage/GetTask/CancelTask, R17–R21 guards, R20
+binary/source routes) enforces one build per task via its own
+`spec_signed` state; the Designer and Coder negotiate from private utility
+profiles over a finite proposal lattice; only the Critic can accept, after
+fetching the binary and replaying a scripted tape. Without a model
+configured, the Coder falls back to the checked-in reference source as an
+offline codegen oracle. Security hardening (injection corpora, leak
+probes, S22 source scan, S24 output handling), offline evals X1–X8, a real
+subprocess slow tier (kill-9 resume, concurrency, LLM-timeout rejection),
+and a measured write-up live in `docs/WRITE_UP.md`.
 
 Remote: https://github.com/kibria-miran/a2a-gamedev-agent
 
@@ -50,9 +54,17 @@ src/coder_server.py     # run the Coder service (uvicorn)
 src/designer_cli.py     # Designer peer: negotiate and sign off
 src/critic_cli.py       # Critic peer: review a task and accept/walk away
 src/three_agent_demo.py # S26: all three agents, one process, real routes
+evals/run_evals.py       # X1-X8 machine-checked experiments (fallback/live)
+evals/injection_payloads.json  # S6 corpus (used by tests and evals)
+evals/leak_probes.json         # S5 corpus
+evals/stress_brief.json        # hostile brief that forces real negotiation
 profiles/               # designer.json / coder.json — private utility profiles
 docs/A2A_PIN.md         # pinned wire vocabulary + R-table + lifecycle
+docs/WRITE_UP.md        # measured results, limitations, token budget
 tests/                  # unit + integration; ASGI in-memory client/server
+tests/test_slow.py      # real subprocesses: S9 kill-9 resume, S10 concurrency,
+                        # S14 LLM-timeout rejection (opt-in, `make slow`)
+tests/fake_nim_server.py# fake NIM HTTP API for the slow tier
 ```
 
 ## Test
@@ -60,12 +72,25 @@ tests/                  # unit + integration; ASGI in-memory client/server
 ```bash
 make check          # fast tests + ruff + mypy
 make fast           # pytest -m "not slow"
+make slow           # opt-in: real subprocesses (kill-9 resume, concurrency, LLM timeout)
 make all            # everything, including slow compiles
 ```
 
 Requires `cc` and `g++` (the harness is compiled into every game). Uses a
 venv at `.venv` by default (`PYTHON=...` to override); install
 `requirements.txt` plus `pytest`, `ruff`, and `mypy`.
+
+## Evals
+
+```bash
+.venv/bin/python evals/run_evals.py --all-offline --runs 10   # x1, x4, x6, x7, x8
+.venv/bin/python evals/run_evals.py --experiment x2 --mode live --runs 10
+```
+
+X1/X2/X3/X5 use `evals/stress_brief.json` (a deliberately hostile brief) so
+negotiation actually happens; X7/X8 use the reference brief. Live arms need
+`NIM_MODEL`/`NVIDIA_API_KEY` in `.env`. Results land in `evals/results/`
+(gitignored except `.gitkeep`) and are summarized in `docs/WRITE_UP.md`.
 
 ## The 3-minute demo
 

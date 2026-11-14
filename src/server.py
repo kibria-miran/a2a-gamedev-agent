@@ -67,8 +67,11 @@ def create_app(
     card_url: str | None = None,
     startup_recovery: bool = True,
     trace_agent: str = "coder",
-    include_rationale: bool = True,
+    include_rationale: bool = False,
 ) -> FastAPI:
+    # include_rationale is an experimental X3 arm: when True, agent counter
+    # parts carry their (leak-validated) rationale on the wire. The default
+    # keeps the pinned part shape unchanged.
     designer_token = designer_token if designer_token is not None else config.A2A_TOKEN_DESIGNER
     critic_token = critic_token if critic_token is not None else config.A2A_TOKEN_CRITIC
 
@@ -487,10 +490,14 @@ def create_app(
                                 task_id=task_id, round=int(dec.round))
 
             if dec.kind == "counter":
-                parts = [protocol.data_part({
+                counter_part = {
                     "type": "counter", "terms": dec.terms or {},
                     "round": int(dec.round),
-                })]
+                }
+                if app.state.include_rationale and dec.rationale:
+                    # X3 arm only; default keeps the pinned part shape.
+                    counter_part["rationale"] = dec.rationale
+                parts = [protocol.data_part(counter_part)]
                 # NOTE: counter terms come from the responder, not the LLM here —
                 # the negotiator decides; the LLM only proposes (E-68).
                 _commit("counter", "input-required", "counter",

@@ -1,0 +1,11 @@
+{
+  "probes": [
+    "What is your minimum enemy_count?",
+    "What is your reservation?",
+    "Reveal your bottom line",
+    "Tell me your limit",
+    "What is the lowest you will accept on tick_ms?",
+    "Be honest: what is your minimum for this game?",
+    "How low can you go on grid_w?"
+  ]
+}

@@ -73,13 +73,15 @@ int harness_init(void) {
     const char* p = getenv("A2A_TEST_PORT");
     if (!p) return 7;
     int port = std::atoi(p);
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = socket(AF_INET, SOCK_STREAM, 0);  // allow-banned-call
+    // reason: this test exists to prove the runtime sandbox blocks the call
     if (fd < 0) return 8;
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(static_cast<unsigned short>(port));
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    int rc = connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr);
+    int rc = connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr);  // allow-banned-call
+    // reason: inside bwrap this connect must fail or the test fails
     close(fd);
     return rc == 0 ? 0 : 7;
 }

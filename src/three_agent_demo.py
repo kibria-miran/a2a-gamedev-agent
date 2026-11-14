@@ -41,8 +41,19 @@ async def run_demo(
     critic_token: str | None = None,
     trace_path: str | None = None,
     verbose: bool = True,
+    designer_profile: Any | None = None,
+    coder_profile: Any | None = None,
+    codegen: Any | None = None,
+    designer_chat: Any | None = None,
+    coder_chat: Any | None = None,
+    include_rationale: bool = False,
 ) -> dict[str, Any]:
-    """Run the full lifecycle and return the final task plus binary bytes."""
+    """Run the full lifecycle and return the final task plus binary bytes.
+
+    ``designer_profile`` / ``coder_profile`` / ``codegen`` are injected by the
+    evals runner; production callers leave them unset and get the checked-in
+    profiles and the standard offline/LLM codegen path.
+    """
 
     designer_token = designer_token or config.A2A_TOKEN_DESIGNER or DEMO_DESIGNER_TOKEN
     critic_token = critic_token or config.A2A_TOKEN_CRITIC or DEMO_CRITIC_TOKEN
@@ -50,16 +61,17 @@ async def run_demo(
         trace.configure(trace_path)
 
     store = Store(db_path)
-    coder_profile = load_coder_profile()
+    coder_profile = coder_profile or load_coder_profile()
     app = create_app(
         store,
-        responder=make_responder(profile=coder_profile),
+        responder=make_responder(profile=coder_profile, chat=coder_chat, codegen=codegen),
         designer_token=designer_token,
         critic_token=critic_token,
         trace_agent="coder",
+        include_rationale=include_rationale,
     )
     brief = load_brief(brief_path)
-    designer_profile = designer_agent.load_designer_profile()
+    designer_profile = designer_profile or designer_agent.load_designer_profile()
 
     transport = httpx.ASGITransport(app=app)
     try:
@@ -70,7 +82,8 @@ async def run_demo(
                 "http://testserver", token=designer_token, http_client=designer_http
             )
             task_id, designer_task = await run_designer(
-                designer, profile=designer_profile, brief=brief, verbose=verbose
+                designer, profile=designer_profile, brief=brief, verbose=verbose,
+                chat=designer_chat,
             )
             signed_view = await designer.get_task(task_id)
 
