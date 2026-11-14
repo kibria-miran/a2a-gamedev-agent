@@ -24,8 +24,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
-from src import config, decision, protocol, state_machine, trace
+from src import coder_agent, config, decision, protocol, state_machine, trace
 from src.store import Store
+from src.utility import Profile
 
 
 class RpcFault(Exception):
@@ -58,6 +59,8 @@ def create_app(
     store: Store,
     *,
     responder: Any | None = None,
+    profile: Profile | None = None,
+    codegen: coder_agent.Codegen | None = None,
     chat: Any | None = None,
     designer_token: str | None = None,
     critic_token: str | None = None,
@@ -77,18 +80,16 @@ def create_app(
     app.state.include_rationale = include_rationale
     app.state.card_url = card_url or config.CODER_URL
     app.state.turns = {}
+    app.state.turn_tasks = {}
     app.state.trace_agent = trace_agent
 
     if responder is None:
-
-        def default_responder(view, incoming, history):
-            return decision.Decision(
-                kind="walk_away",
-                reason="negotiator_not_configured",
-                rationale="no spec negotiator wired into the service yet (Phase 4)",
-            )
-
-        app.state.responder = default_responder
+        # The real Coder negotiator and one-build turn (Phase 4). It loads the
+        # private profile lazily; tests and embedded demos can inject another
+        # responder without touching this path.
+        app.state.responder = coder_agent.make_responder(
+            profile=profile, chat=chat, codegen=codegen
+        )
     else:
         app.state.responder = responder
 
@@ -407,6 +408,13 @@ def create_app(
         # rejected this way — builds come from the service).
         if type_ == "build" and not bool(task["spec_signed"]):
             raise _fault(config.JSONRPC_INVALID_PARAMS, config.REASONS["R18"], kind="bad_params")
+        # E-68: one build per task. Re-signing an already-signed spec would
+        # start a second build turn, so it is rejected at the message layer.
+        if type_ == "spec_signed" and bool(task["spec_signed"]):
+            raise _fault(
+                config.JSONRPC_INVALID_PARAMS, config.REASONS["ALREADY_SIGNED"],
+                kind="bad_params",
+            )
         # R19: accept must be the critic AND after signoff.
         if type_ == "accept" and (role != "critic" or not bool(task["spec_signed"])):
             raise _fault(config.JSONRPC_INVALID_PARAMS, config.REASONS["R19"], kind="bad_params")
@@ -434,7 +442,14 @@ def create_app(
         own_history = store.own_utility_history(task_id)
         turn = asyncio.create_task(_run_turn(task_id, incoming, view, own_history))
         app.state.turns[turn] = None
-        turn.add_done_callback(lambda done: app.state.turns.pop(done, None))
+        app.state.turn_tasks[task_id] = turn
+
+        def _cleanup(done: asyncio.Task[None]) -> None:
+            app.state.turns.pop(done, None)
+            if app.state.turn_tasks.get(task_id) is done:
+                app.state.turn_tasks.pop(task_id, None)
+
+        turn.add_done_callback(_cleanup)
         return StartedTurn(task_id=task_id, turn=turn)
 
     async def _await_turn(started: StartedTurn) -> dict[str, Any]:
@@ -557,6 +572,13 @@ def create_app(
             raise _fault(config.A2A_TASK_NOT_FOUND, "task not found")
         if error == config.A2A_TASK_NOT_CANCELABLE:
             raise _fault(config.A2A_TASK_NOT_CANCELABLE, "task not cancelable")
+
+        # Cancel a running turn too: the responder thread may still finish,
+        # but its CAS commit will be discarded against the canceled state.
+        running = app.state.turn_tasks.get(task_id)
+        if running is not None and not running.done():
+            running.cancel()
+
         view = store.task_view(task_id)
         assert view is not None
         return view

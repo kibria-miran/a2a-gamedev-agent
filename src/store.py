@@ -456,18 +456,28 @@ class Store:
         return updated, None
 
     def startup_recovery(self) -> int:
-        """T8: submitted/working -> input-required, round_at_turn_start = round."""
+        """T8: submitted/working -> input-required.
+
+        ``round_at_turn_start`` is the round of the last stored user message,
+        not the post-increment ``tasks.round``: E-67's begin_turn already
+        advanced ``round`` past the message, so only the message round lets
+        R6c resume the interrupted turn without drift (RESUME_DRIFT). A task
+        with no message falls back to the current round.
+        """
 
         rows = self.conn.execute(
-            "SELECT id FROM tasks WHERE state IN ('submitted','working')"
+            "SELECT id, round FROM tasks WHERE state IN ('submitted','working')"
         ).fetchall()
         recovered = 0
         with self.conn:
             for row in rows:
+                last = self.last_message(row["id"], "user")
+                stored_round = self.message_round(last) if last is not None else None
+                start = stored_round if stored_round is not None else int(row["round"])
                 self.conn.execute(
                     "UPDATE tasks SET state = 'input-required',"
-                    " round_at_turn_start = round, updated_at = ? WHERE id = ?",
-                    (_now_iso(), row["id"]),
+                    " round_at_turn_start = ?, updated_at = ? WHERE id = ?",
+                    (start, _now_iso(), row["id"]),
                 )
                 recovered += 1
         return recovered

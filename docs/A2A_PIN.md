@@ -3,6 +3,12 @@
 Pinned wire vocabulary for the three-agent game dev loop. Implementation:
 `src/server.py` (Coder service), `src/client.py` (Designer/Critic), `src/protocol.py` (models).
 
+The peers themselves live in `src/designer_agent.py`, `src/coder_agent.py`, and
+`src/critic_agent.py`; `src/negotiator.py` supplies the proposal lattice and
+acceptance rule. `src/coder_server.py`, `src/designer_cli.py`,
+`src/critic_cli.py`, and `src/three_agent_demo.py` are the runnable entry
+points.
+
 ## Methods
 
 | JSON-RPC method | Semantics |
@@ -78,6 +84,11 @@ round mismatch → R10 accept mismatch → **R17 spec_signed not from designer
 → R18 build before spec_signed → R19 accept not from critic or before
 signoff → R20 artifact not found** → R21 spec message not from designer.
 
+`ALREADY_SIGNED` (`-32602`, "spec already signed") is the E-68 guard layered on
+top of those rows: once a task has `spec_signed`, another `spec_signed` is
+rejected rather than opening a second build turn. Combined with R18, this
+makes "one build per task" a server-side invariant, not a client convention.
+
 G1–G3 (`GetTask` param check / clamp / not found) and C1–C5 (`CancelTask`
 param check / idempotent / not cancelable) map onto the server's
 `_get_task`/`_cancel_task`.
@@ -96,3 +107,8 @@ the coder's service). The Coder builds **once** (E-68) and replies with a
 binary over R20 (sha256 verified) and plays a scripted tape; its terminal
 actions are `accept` (completed) or `walk_away` (rejected). A failed build
 after `COMPILE_RETRIES` yields `walk_away` with `reason=build_failed`.
+
+Because the server remembers `spec_signed`, a re-signed spec is refused with
+`ALREADY_SIGNED` and no second build turn can start. The Coder never accepts:
+when incoming terms clear its own acceptance threshold it counters with the
+same terms so the Designer can sign off (E-66).

@@ -79,6 +79,36 @@ A2A_ROLE_BY_INTERNAL = {"user": "ROLE_USER", "agent": "ROLE_AGENT"}
 INTERNAL_ROLE_BY_A2A = {wire: internal for internal, wire in A2A_ROLE_BY_INTERNAL.items()}
 
 # ---------------------------------------------------------------------------
+# Negotiation curve and tolerance (v1.1 Phase 4; same shape as the demo)
+# ---------------------------------------------------------------------------
+# Boulware concession: target utility falls from START_U to END_U over
+# MAX_ROUNDS. The code decides acceptance (D-5/E-12); the LLM may only
+# propose. EPS_* are tolerances, never loosen them to hide a bug.
+MAX_ROUNDS = 8
+START_U = 0.90
+END_U = 0.10
+BETA_DEFAULT = 2.0
+BAND_LOW = 0.05
+BAND_HIGH = 0.10
+EPS_ACCEPT = 0.03
+EPS_MONOTONE = 0.02
+EPS_BAND = 0.03
+
+# Private profiles live outside config; each agent reads only its own file.
+PROFILES_DIR = os.getenv("A2A_PROFILES_DIR", "profiles")
+DESIGNER_PROFILE_PATH = os.getenv("A2A_DESIGNER_PROFILE", "profiles/designer.json")
+CODER_PROFILE_PATH = os.getenv("A2A_CODER_PROFILE", "profiles/coder.json")
+
+# The Critic plays a fixed, deterministic tape over every build. Keeping it
+# in config makes the review reproducible across processes.
+CRITIC_TAPE = (
+    b"key a\nkey d\nkey k\n"
+    + b"tick\n" * 10
+    + b"key k\ntick\n"
+    + b"tick\n" * 15
+)
+
+# ---------------------------------------------------------------------------
 # Caps, limits, tolerance, storage
 # ---------------------------------------------------------------------------
 MAX_MESSAGE_BYTES = 16_384
@@ -109,6 +139,7 @@ REASONS = {
     "R19": "accept not from critic or before signoff",
     "R20": "artifact not found",
     "R21": "spec message not from designer",
+    "ALREADY_SIGNED": "spec already signed",
 }
 
 # ---------------------------------------------------------------------------
@@ -227,5 +258,6 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 LLM_TIMEOUT = float(os.getenv("A2A_LLM_TIMEOUT", "60.0"))
 LLM_TEMPERATURE = 0.3
+LLM_RETRY_ATTEMPTS = 1  # one retry after the first failure (D-13)
 LLM_MAX_TOKENS = 8_192  # a whole .cpp file comfortably fits; do not starve it
 
