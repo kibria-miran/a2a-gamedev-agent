@@ -7,16 +7,14 @@ here — exactly what E-69 requires for the unshare fallback.
 """
 
 import hashlib
+import http.server
 import io
 import os
 import socket
-import subprocess
 import tarfile
 import threading
 import time
 from pathlib import Path
-
-import http.server
 
 import pytest
 

@@ -6,10 +6,9 @@ exercise the same harness contract.
 """
 
 import pytest
+from tests.conftest import FakeLLM
 
 from src import coder_agent, config, llm, prompts, sandbox
-
-from tests.conftest import FakeLLM
 
 SPEC = {
     "brief": "a tiny single-player invaders clone on a 40x20 grid",

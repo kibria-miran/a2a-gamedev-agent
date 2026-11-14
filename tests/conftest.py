@@ -8,8 +8,6 @@ from typing import Any
 
 import pytest
 
-from src import config
-
 
 @pytest.fixture(autouse=True)
 def _no_real_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:

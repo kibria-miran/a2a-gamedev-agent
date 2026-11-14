@@ -9,9 +9,9 @@ digest printing — is the real path.
 import json
 from pathlib import Path
 
-from src import coder_agent, sandbox
-
 from tests.conftest import FakeLLM
+
+from src import coder_agent, sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE_GAME = ROOT / "evals" / "reference_games" / "invaders" / "main.cpp"

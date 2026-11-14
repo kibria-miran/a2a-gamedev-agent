@@ -13,7 +13,6 @@ knobs (``HARNESS_*``) in ``src/harness/harness.c``.
 from __future__ import annotations
 
 import os
-from typing import Any
 
 # ---------------------------------------------------------------------------
 # A2A protocol pin (see docs/A2A_PIN.md; same architecture as the demo)
@@ -109,6 +108,7 @@ REASONS = {
     "R18": "build before spec_signed",
     "R19": "accept not from critic or before signoff",
     "R20": "artifact not found",
+    "R21": "spec message not from designer",
 }
 
 # ---------------------------------------------------------------------------
@@ -199,6 +199,22 @@ CATEGORICAL_TABLES = {
     "win_condition": WIN_CONDITION_UTILITY,
     "reliability": RELIABILITY_UTILITY,
 }
+
+# ---------------------------------------------------------------------------
+# Address of the Coder service (the card URL and clients derive from this)
+# ---------------------------------------------------------------------------
+CODER_HOST = "127.0.0.1"
+CODER_PORT = 8003
+CODER_URL = f"http://{CODER_HOST}:{CODER_PORT}"
+
+# ---------------------------------------------------------------------------
+# Concurrency and polling (seconds unless stated otherwise)
+# ---------------------------------------------------------------------------
+BLOCKING_TIMEOUT = float(os.getenv("A2A_BLOCKING_TIMEOUT", "45.0"))
+HTTP_TIMEOUT = float(os.getenv("A2A_HTTP_TIMEOUT", "60.0"))
+POLL_MAX = float(os.getenv("A2A_POLL_MAX", "60.0"))
+POLL_INTERVAL = 2.0
+MAX_RETRY_TOTAL = 15.0
 
 # ---------------------------------------------------------------------------
 # LLM / NIM (values come from the environment; never logged)

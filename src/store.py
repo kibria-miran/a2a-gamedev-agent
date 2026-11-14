@@ -366,6 +366,38 @@ class Store:
                 self._insert_agreement_artifact(task_id, agreement_terms, now=_now_iso())
             return cursor.rowcount == 1
 
+    def commit_user_walk_away(
+        self,
+        task_id: str,
+        *,
+        message_id: str | None = None,
+        parts: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Terminal walk-away from a CLIENT (designer mid-negotiation, or critic).
+
+        No agreement, no agent reply. input-required -> working -> rejected or
+        (from working, after begin_turn stored the message) working -> rejected.
+        """
+
+        with self.conn:
+            task = self.get_task(task_id)
+            if task is None:
+                raise StoreError("task not found")
+            if task["state"] == "input-required":
+                state_machine.transition("input-required", "working")
+                state_machine.transition("working", "rejected")
+            elif task["state"] != "rejected":
+                state_machine.transition(task["state"], "rejected")
+            if message_id is not None and parts is not None:
+                self._insert_message(task_id, message_id, "user", parts)
+            self.conn.execute(
+                "UPDATE tasks SET state = 'rejected', updated_at = ? WHERE id = ?",
+                (_now_iso(), task_id),
+            )
+        updated = self.get_task(task_id)
+        assert updated is not None
+        return updated
+
     def complete_with_accept(
         self,
         task_id: str,

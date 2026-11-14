@@ -10,7 +10,8 @@ import hashlib
 
 import pytest
 
-from src import config, state_machine, store as store_mod
+from src import config, state_machine
+from src import store as store_mod
 
 
 @pytest.fixture

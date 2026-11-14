@@ -4,17 +4,17 @@ from src import config
 
 
 def test_state_map_is_a_bijection():
-    assert config.INTERNAL_STATE_BY_A2A == {
+    assert {
         wire: internal for internal, wire in config.A2A_STATE_BY_INTERNAL.items()
-    }
+    } == config.INTERNAL_STATE_BY_A2A
     for internal in config.TASK_STATES:
         assert config.A2A_STATE_BY_INTERNAL[internal].startswith("TASK_STATE_")
 
 
 def test_role_map_is_a_bijection():
-    assert config.INTERNAL_ROLE_BY_A2A == {
+    assert {
         wire: internal for internal, wire in config.A2A_ROLE_BY_INTERNAL.items()
-    }
+    } == config.INTERNAL_ROLE_BY_A2A
 
 
 def test_reasons_for_v11_rows_present_and_short():
