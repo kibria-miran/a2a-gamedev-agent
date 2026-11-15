@@ -94,6 +94,11 @@ is what the key can call today):
   reservations). The LLM is not better because of magic; it is better
   because it proposes instead of conceding lattice steps;
 - **X3 (n=2)** — 0 rationales with leak phrases on the wire in either arm;
+- **X3 (n=10, 2026-11-15)** — both arms 10/10 agreement; 0 rationale leaks
+  on the wire; the `rationale_on` arm passes the new hard gate (X3 exits
+  nonzero on any leaked rationale). Latency mean 46 s/37 s per arm, max
+  288 s; tokens per arm ≈9.7k in / 38.8k out (≈970 in per run). Rationale
+  on the wire did not change agreement (1.00 both arms).
 - **X5** — cannot run here: the account enables a single usable model id.
   Use `--designer-model/--coder-model` with two enabled models.
 - **X6 (live)** — not run here; see X6 note above.
@@ -108,8 +113,9 @@ is what the key can call today):
 - **Offline X6 is vacuous** (V3 guards the LLM path only); likewise the
   fallback never produces rejected proposals, so `fallback` totals are
   optimal-but-rigid.
-- **Live sample sizes are tiny** (n=2); X3 shows a 157 s latency outlier
-  (reasoning model) — treat X2/X3 numbers as directional, not significant.
+- **Live sample sizes are small** (X2 n=2; X3 n=10). X3 shows 206–288 s
+  latency outliers (reasoning model) — treat the numbers as directional,
+  not significant.
 - **Model availability is account-gated.** `step-5-preview`,
   `minimax-m3.1-flash`, `deepseek-v4.1-flash` all 200 on smoke tests but
   hang or return zero tokens on large codegen prompts; the usable model is
