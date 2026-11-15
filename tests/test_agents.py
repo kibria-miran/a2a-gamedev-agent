@@ -270,6 +270,90 @@ async def test_critic_walks_away_without_a_build(mini_build):
     assert decision.reason == "no_build"
 
 
+ALLOW_LISTED_SOURCE = """
+#include "harness.h"
+#include <ctime>
+#include <cstdio>
+int harness_init(void) { return 0; }
+void harness_tick(void) {}
+const char* harness_render(void) {
+    std::time_t t = std::time(nullptr); // allow-nondeterministic
+    // reason: allow-listed escape hatch; digest may differ across boots
+    static char buf[32];
+    std::snprintf(buf, sizeof buf, "t=%lld", (long long)t);
+    return buf;
+}
+"""
+
+
+def _tar_bytes(sources):
+    import io
+    import tarfile
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for name, text in sorted(sources.items()):
+            data = text.encode("utf-8")
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mtime = 0
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+class AllowListedClient(StubClient):
+    """StubClient plus the R20 source route, backed by a fixed tar."""
+
+    def __init__(self, blob, tar_bytes):
+        super().__init__(blob)
+        self._tar = tar_bytes
+
+    async def fetch_source(self, task_id, artifact_id):
+        return self._tar, hashlib.sha256(self._tar).hexdigest(), len(self._tar)
+
+
+async def test_critic_threads_the_source_allow_list_into_the_gate(mini_build):
+    """E-74: a source allow-listed via ``// allow-nondeterministic`` must reach
+    the determinism gate as ``nondeterministic_source=True`` — the Coder's
+    wire claims are not trusted; the fetched source tar is the evidence."""
+    tar = _tar_bytes({"main.cpp": ALLOW_LISTED_SOURCE})
+    captured = {}
+
+    def recording_gate(blob, *, tape, nondeterministic_source, extra_env):
+        captured["nondeterministic_source"] = nondeterministic_source
+        return sandbox.DeterminismGate(
+            ran_twice=True, ok=True, nondeterministic_source=nondeterministic_source
+        )
+
+    decision = await critic_agent.review(
+        build_view(mini_build),
+        AllowListedClient(mini_build.binary_bytes or b"", tar),
+        gate=recording_gate,
+    )
+    assert captured["nondeterministic_source"] is True
+    assert decision.kind == "accept"
+
+
+async def test_critic_falls_back_to_the_strict_gate_without_a_source_route(mini_build):
+    """A client without fetch_source (or a failing fetch) fails closed:
+    the gate runs as if the source were not allow-listed."""
+    captured = {}
+
+    def recording_gate(blob, *, tape, nondeterministic_source, extra_env):
+        captured["nondeterministic_source"] = nondeterministic_source
+        return sandbox.DeterminismGate(
+            ran_twice=True, ok=True, nondeterministic_source=nondeterministic_source
+        )
+
+    decision = await critic_agent.review(
+        build_view(mini_build),
+        StubClient(mini_build.binary_bytes or b""),
+        gate=recording_gate,
+    )
+    assert captured["nondeterministic_source"] is False
+    assert decision.kind == "accept"
+
+
 def test_sample_digests_keeps_the_final_frame():
     digests = tuple((i, f"{i:08x}") for i in range(200))
     sampled = history.sample_digests(digests, limit=10)

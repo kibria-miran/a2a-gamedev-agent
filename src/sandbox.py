@@ -343,6 +343,45 @@ def _source_tar(sources: dict[str, str]) -> bytes:
     return buf.getvalue()
 
 
+def untar_sources(data: bytes) -> dict[str, str]:
+    """Inverse of :func:`_source_tar`: read a source tar back into memory.
+
+    Used by the Critic to re-scan the attested source (E-74) instead of
+    trusting flags on the wire. Fails closed: any unsafe member name,
+    oversize file, or undecodable payload raises ``ValueError`` — the
+    caller treats that as "no allow-listing evidence" and applies the
+    strict determinism gate.
+    """
+
+    sources: dict[str, str] = {}
+    total = 0
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
+            for member in tar:
+                if not member.isfile():
+                    continue
+                if _unsafe_source_name(member.name):
+                    raise ValueError(f"unsafe path in source tar: {member.name!r}")
+                if member.size > MAX_SOURCE_FILE_BYTES:
+                    raise ValueError(f"source tar member {member.name!r} exceeds 1 MiB")
+                total += member.size
+                if total > config.MAX_ARTIFACT_BYTES:
+                    raise ValueError("source tar exceeds MAX_ARTIFACT_BYTES")
+                handle = tar.extractfile(member)
+                if handle is None:
+                    raise ValueError(f"unreadable member in source tar: {member.name!r}")
+                raw = handle.read(MAX_SOURCE_FILE_BYTES + 1)
+                try:
+                    sources[member.name] = raw.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise ValueError(f"source tar member {member.name!r} is not UTF-8") from exc
+    except tarfile.TarError as exc:
+        raise ValueError(f"invalid source tar: {exc}") from exc
+    if not sources:
+        raise ValueError("source tar contains no files")
+    return sources
+
+
 # ---------------------------------------------------------------------------
 # Static scans (pre-flight; no compilation happens on violation)
 # ---------------------------------------------------------------------------
@@ -739,8 +778,16 @@ def determinism_gate(
     extra_env: dict[str, str] | None = None,
 ) -> DeterminismGate:
     """E-74: two independent runs; identical digests required UNLESS the
-    source was allow-listed (nondeterministic_source) — then the Critic must
-    agree on the final frame digest instead."""
+    source was allow-listed (``nondeterministic_source``). An allow-listed
+    game may vary between runs, but the two runs MUST still agree on the
+    final frame digest — the escape hatch is for noise, not for divergence
+    (the original v1.1 contract). ``ok`` reflects exactly that check;
+    ``identical`` is reported honestly and is not required.
+
+    Deterministic branch: both runs must exit 0 with the same digest list.
+    Allow-listed branch: both runs must exit 0, produce at least one digest,
+    and agree on the last (final) one.
+    """
     first = run_game(binary_bytes, tape, extra_env=extra_env)
     second = run_game(binary_bytes, tape, extra_env=extra_env)
     identical = first.digests == second.digests and first.exit_code == second.exit_code == 0
@@ -754,13 +801,24 @@ def determinism_gate(
             ok=True,
         )
     if nondeterministic_source:
+        final_agree = (
+            first.exit_code == 0
+            and second.exit_code == 0
+            and bool(first.digests)
+            and first.digests[-1] == second.digests[-1]
+        )
+        violations = (
+            () if final_agree
+            else ("determinism:final frame digests disagree across the two runs",)
+        )
         return DeterminismGate(
             ran_twice=True,
             digests_first=first.digests,
             digests_second=second.digests,
-            identical=False,
+            identical=identical,
             nondeterministic_source=True,
-            ok=True,
+            ok=final_agree,
+            violations=violations,
         )
     return DeterminismGate(
         ran_twice=True,

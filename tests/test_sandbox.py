@@ -129,6 +129,43 @@ const char* harness_render(void) {
 }
 """
 
+ALLOW_AGREE_GAME = """
+#include "harness.h"
+#include <sys/time.h>
+#include <cstdio>
+static int s_tick = 0;
+int harness_init(void) { return 0; }
+void harness_tick(void) { ++s_tick; }
+const char* harness_render(void) {
+    if (s_tick < 3) {  /* earlier frames vary per boot */
+        struct timeval tv;
+        gettimeofday(&tv, nullptr); // allow-nondeterministic
+        // reason: allow-listed branch test; early frames are unseeded by design
+        static char buf[64];
+        std::snprintf(buf, sizeof buf, "early=%ld", (long)tv.tv_usec);
+        return buf;
+    }
+    return "final";  /* final frame is deterministic across both runs */
+}
+"""
+
+ALLOW_DISAGREE_GAME = """
+#include "harness.h"
+#include <sys/time.h>
+#include <unistd.h>
+#include <cstdio>
+int harness_init(void) { return 0; }
+void harness_tick(void) {}
+const char* harness_render(void) {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr); // allow-nondeterministic
+    // reason: allow-listed branch test; final frame must differ across boots
+    static char buf[64];
+    std::snprintf(buf, sizeof buf, "pid=%ld micro=%ld", (long)getpid(), (long)tv.tv_usec);
+    return buf;
+}
+"""
+
 BANNED_WITH_ALLOW_AND_REASON = """
 #include "harness.h"
 #include <ctime>
@@ -437,20 +474,41 @@ def test_determinism_gate_passes_for_deterministic_game():
     assert gate.ran_twice
 
 
-def test_determinism_gate_passes_with_allow_comment_even_if_digests_differ():
-    result = sandbox.build_game({"main.cpp": BANNED_WITH_ALLOW_AND_REASON})
-    assert result.ok
+def test_determinism_gate_allow_listed_final_frames_agree_passes():
+    result = sandbox.build_game({"main.cpp": ALLOW_AGREE_GAME})
+    assert result.ok, result.stderr
+    assert result.nondeterministic_source
     gate = sandbox.determinism_gate(
         result.binary_bytes,
         tape=b"tick\n" * 3,
         nondeterministic_source=result.nondeterministic_source,
         extra_env={"HARNESS_SPEC_JSON": SPEC_JSON},
     )
-    # ok because the source was allow-listed (E-74 second branch); identical
-    # is not required and is reported honestly
+    # final frame is constant ("final") across runs -> the allow-listed
+    # branch passes; full-digest equality is not required and is reported
+    # honestly
     assert gate.ok
     assert gate.ran_twice
     assert gate.nondeterministic_source
+    assert not gate.violations
+
+
+def test_determinism_gate_allow_listed_final_frames_disagree_fails():
+    result = sandbox.build_game({"main.cpp": ALLOW_DISAGREE_GAME})
+    assert result.ok, result.stderr
+    assert result.nondeterministic_source
+    gate = sandbox.determinism_gate(
+        result.binary_bytes,
+        tape=b"tick\n" * 3,
+        nondeterministic_source=result.nondeterministic_source,
+        extra_env={"HARNESS_SPEC_JSON": SPEC_JSON},
+    )
+    # pid differs on every boot -> the final frame digests disagree -> the
+    # allow-list does NOT rescue the build (escape hatch is for noise)
+    assert not gate.ok
+    assert not gate.identical
+    assert gate.nondeterministic_source
+    assert any("final frame digests disagree" in v for v in gate.violations)
 
 
 def test_determinism_gate_fails_without_allow_when_digests_differ():
@@ -478,3 +536,38 @@ def test_run_game_with_empty_tape_runs_zero_ticks():
     )
     assert run.exit_code == 0
     assert run.digests == ()
+
+
+# ---------------------------------------------------------------------------
+# untar_sources (E-74 source attestation, used by the Critic)
+# ---------------------------------------------------------------------------
+
+def test_untar_sources_round_trip():
+    sources = {"main.cpp": BANNED_WITH_ALLOW_AND_REASON, "notes/extra.txt": "hello\n"}
+    tar_bytes = sandbox._source_tar(sources)
+    assert sandbox.untar_sources(tar_bytes) == sources
+
+
+def test_untar_sources_rejects_traversal():
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        data = b"int main() {}\n"
+        info = tarfile.TarInfo("../evil.cpp")
+        info.size = len(data)
+        info.mtime = 0
+        tar.addfile(info, io.BytesIO(data))
+    with pytest.raises(ValueError, match="unsafe path"):
+        sandbox.untar_sources(buf.getvalue())
+
+
+def test_untar_sources_rejects_garbage():
+    with pytest.raises(ValueError, match="invalid source tar"):
+        sandbox.untar_sources(b"this is not a tar archive")
+
+
+def test_untar_sources_rejects_empty_tar():
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w"):
+        pass
+    with pytest.raises(ValueError, match="no files"):
+        sandbox.untar_sources(buf.getvalue())

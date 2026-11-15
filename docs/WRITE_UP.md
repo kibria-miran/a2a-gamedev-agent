@@ -21,8 +21,11 @@ this machine, and where it is honest to stop trusting it.
   for signoff, E-66), builds once after `spec_signed`, walks away on
   failure. Never accepts.
 - **Critic** (`src/critic_agent.py`): fetches the binary over R20, verifies
-  sha256/size, replays a scripted tape twice (determinism gate, E-74), and
-  only then accepts. Its own terminal action is `accept` or `walk_away`.
+  sha256/size, re-derives the source allow-list by re-scanning the attested
+  source tar, replays a scripted tape twice (determinism gate, E-74), and
+  only then accepts. The allow-listed branch still requires both runs to
+  agree on the final frame digest — noise tolerated, divergence rejected.
+  Its own terminal action is `accept` or `walk_away`.
 - **Negotiator** (`src/negotiator.py`): frozen 36,864-candidate lattice
   fallback; LLM proposals validated V1–V7 (schema, feasible, band, monotone,
   leak, instruction, markup); *code decides acceptance* (D-5). Utilities are

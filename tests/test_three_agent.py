@@ -74,3 +74,29 @@ async def test_s26_build_failure_terminal_task_does_not_crash(monkeypatch):
     assert result["task"]["status"]["state"] == "TASK_STATE_REJECTED"
     assert result["binary"] == b""
     assert result["artifact"] is None
+
+
+async def test_s26_critic_walk_away_rejects_the_task_without_crashing(monkeypatch):
+    """Build succeeds, but the Critic walks away (e.g. play failure).
+
+    Regression: the demo used to hit ``UnboundLocalError`` on ``binary``
+    after a Critic walk_away instead of returning the result.
+    """
+    from src import three_agent_demo
+    from src.decision import Decision
+
+    async def fake_review(view, client, **kwargs):
+        build = history.latest_build(view)
+        build_round = int(build["round"]) if build else 0
+        return Decision(kind="walk_away", reason="play_failed", round=build_round)
+
+    monkeypatch.setattr(three_agent_demo.critic_agent, "review", fake_review)
+
+    result = await run_demo(db_path=":memory:", verbose=False)
+
+    assert result["decision"].kind == "walk_away"
+    assert result["decision"].reason == "play_failed"
+    assert result["task"]["status"]["state"] == "TASK_STATE_REJECTED"
+    assert result["binary"] == b""
+    assert result["sha256"] == ""
+    assert result["artifact"] is not None

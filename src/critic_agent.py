@@ -83,10 +83,24 @@ async def review(
     if not played.digests:
         return Decision(kind="walk_away", reason="no_frame_digests")
 
+    # E-74: the allow-nondeterministic escape hatch is a property of the
+    # source, not of the build's claims. The Coder's wire cannot be trusted,
+    # so re-derive the flag from the attested source tar over R20: if the
+    # tar cannot be fetched or scanned, fall back to the strict gate.
+    nondeterministic_source = False
+    try:
+        tar_bytes, _sha, _size = await client.fetch_source(task_id, artifact_id)
+        nondeterministic_source = sandbox.scan_determinism(
+            sandbox.untar_sources(tar_bytes)
+        ).nondeterministic_source
+    except Exception:
+        # Includes clients that do not implement fetch_source; failing closed.
+        nondeterministic_source = False
+
     checked = gate(
         blob,
         tape=tape or config.CRITIC_TAPE,
-        nondeterministic_source=False,
+        nondeterministic_source=nondeterministic_source,
         extra_env=extra_env,
     )
     if not checked.ok:

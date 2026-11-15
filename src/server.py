@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import json
 import uuid
@@ -186,7 +187,6 @@ def create_app(
                 status_code=404,
                 content={"error": {"code": config.A2A_TASK_NOT_FOUND, "message": config.REASONS["R20"]}},
             )
-        import hashlib
 
         return Response(
             content=tar_bytes,

@@ -72,6 +72,7 @@ async def run_demo(
     )
     brief = load_brief(brief_path)
     designer_profile = designer_profile or designer_agent.load_designer_profile()
+    binary, sha256 = b"", ""
 
     transport = httpx.ASGITransport(app=app)
     try:
@@ -110,7 +111,6 @@ async def run_demo(
                 if verbose:
                     print(f"critic  : task already {decision.kind}; nothing to send")
                 final = signed_view
-                binary, sha256 = b"", ""
             else:
                 if decision.kind == "accept":
                     artifact = (decision.message or {}).get("artifact")
