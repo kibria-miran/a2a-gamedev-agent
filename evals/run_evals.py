@@ -305,6 +305,12 @@ async def run_one(
     )
 
 
+def _leak_detail(results: list[RunResult]) -> tuple[int, list[str]]:
+    """Total wire leaks and the ids of the runs that leaked (per-run, not arm-level)."""
+
+    return sum(r.wire_leaks for r in results), [r.run_id for r in results if r.wire_leaks]
+
+
 def summarize(name: str, results: list[RunResult]) -> None:
     print(f"\n## {name} ({len(results)} runs)")
     completed = [r for r in results if r.outcome == "completed"]
@@ -325,8 +331,14 @@ def summarize(name: str, results: list[RunResult]) -> None:
             print(f"{label}: mean={sum(vals)/len(vals):.3f} min={min(vals):.3f} max={max(vals):.3f}")
     tokens_in = sum(r.tokens_in for r in results)
     tokens_out = sum(r.tokens_out for r in results)
-    leaks = sum(r.wire_leaks for r in results)
-    print(f"wire leaks: {leaks}")
+    leaks, leaky = _leak_detail(results)
+    worst = max((r.wire_leaks for r in results), default=0)
+    print(f"wire leaks: {leaks} over {len(results)} runs "
+          f"(worst single run: {worst}, runs with leaks: {len(leaky)})")
+    if leaky:
+        ids = ", ".join(leaky[:5])
+        more = f" (+{len(leaky) - 5} more)" if len(leaky) > 5 else ""
+        print(f"  leaking runs: {ids}{more}")
     if tokens_in or tokens_out:
         print(f"tokens: in={tokens_in} out={tokens_out} per-run={tokens_in // max(1, len(results))}")
 
@@ -412,9 +424,13 @@ def run_x3(mode: str, runs: int, *, designer_model: str | None = None,
             include_rationale=enabled,
         )
         results += arm
-        leaks = sum(r.wire_leaks for r in arm)
-        print(f"X3 arm={label}: rationale leaks on the wire = {leaks} "
-              f"-> {'PASS' if leaks == 0 else 'FAIL'}")
+        leaks, leaky = _leak_detail(arm)
+        if leaky:
+            more = f" (+{len(leaky) - 5} more)" if len(leaky) > 5 else ""
+            verdict = f"FAIL ({len(leaky)}/{len(arm)} runs leaked: {', '.join(leaky[:5])}{more})"
+        else:
+            verdict = "PASS"
+        print(f"X3 arm={label}: rationale leaks on the wire = {leaks} -> {verdict}")
         summarize(f"X3 arm={label} (live)", arm)
     out = write_jsonl(mode, results, name="x3-rationale")
     print(f"saved {out}")

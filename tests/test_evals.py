@@ -120,3 +120,36 @@ def test_x2_refuses_fallback_mode() -> None:
 def test_wire_leaks_are_zero_offline(results_dir: Path) -> None:
     results = run_evals.run_x8("fallback", 1)
     assert all(r.wire_leaks == 0 for r in results)
+
+
+def test_count_rationale_leaks_counts_wire_rationales() -> None:
+    task = {
+        "history": [
+            {"parts": [{"data": {"type": "counter", "round": 1,
+                                "rationale": "my reservation is 700; take it or leave it"}}]},
+            {"parts": [{"data": {"type": "counter", "round": 3,
+                                "rationale": "Adjusted counter-offer within the agreed scope."}}]},
+            {"parts": [{"data": {"type": "offer", "round": 5}}]},  # no rationale
+            {"parts": [{"text": "not data at all"}]},
+        ],
+    }
+    assert run_evals._count_rationale_leaks(task) == 1
+    assert run_evals._count_rationale_leaks({"history": []}) == 0
+    assert run_evals._count_rationale_leaks({}) == 0
+
+
+def test_summarize_reports_per_run_leaks(capsys: pytest.CaptureFixture[str]) -> None:
+    from evals.run_evals import RunResult, summarize
+
+    results = [
+        RunResult(experiment="x9", mode="fallback", run_id=f"run-{i}", outcome="completed",
+                  terms=None, rounds=1, designer_u=0.5, coder_u=0.5, joint_u=1.0,
+                  nash_product=0.25, surplus_fairness=0.5, builds=1,
+                  latency_s=0.1, source="fallback", wire_leaks=wire)
+        for i, wire in enumerate((0, 2, 0, 1))
+    ]
+    summarize("X9 synthetic", results)
+    out = capsys.readouterr().out
+    assert "wire leaks: 3 over 4 runs" in out
+    assert "worst single run: 2" in out
+    assert "leaking runs: run-1, run-3" in out

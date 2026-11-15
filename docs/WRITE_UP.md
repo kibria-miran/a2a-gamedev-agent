@@ -137,9 +137,7 @@ consume it first, and `LLM_RETRY_ATTEMPTS = 1` keeps that bounded.
 
 1. A second enabled NIM model → run X5 for real; a non-reasoning model
    would also cut the X3 latency outlier.
-2. Per-run rationale leak scanning recorded in `evals/results/*.jsonl`
-   (currently summarized globally at arm level).
-3. Digest-forge detection research: identical-line spam filtering inside
+2. Digest-forge detection research: identical-line spam filtering inside
    the Critic (currently indistinguishable from honest ticks by design —
    that is why the critic does not consume binary stdout).
 
@@ -148,7 +146,9 @@ Done since v1.1: borderline-infeasibility profile pair + stress brief —
 `tests/test_infeasible.py` (agreement is 0.0 by construction: the lattices
 are disjoint, the demo rejects without a build, `make check` and CI guard
 it). The slow tier (kill-9 resume, concurrency, LLM-timeout) now also
-runs in CI (`.github/workflows/ci.yml`).
+runs in CI (`.github/workflows/ci.yml`). Per-run rationale leak scanning
+is recorded (`wire_leaks`, `seed`) in `evals/results/*.jsonl` and
+`summarize()` prints worst-run/leaking-ids; X3 prints a per-run verdict.
 
 ## Reproduce
 
