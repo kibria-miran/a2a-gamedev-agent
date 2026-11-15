@@ -1,0 +1,28 @@
+{
+  "name": "coder-infeasible",
+  "beta": 2.0,
+  "issues": {
+    "grid_w": {"direction": "min", "ideal": 16, "reservation": 24, "weight": 0.30},
+    "grid_h": {"direction": "min", "ideal": 12, "reservation": 16, "weight": 0.16},
+    "tick_ms": {"direction": "max", "ideal": 300, "reservation": 200, "weight": 0.08},
+    "enemy_count": {"direction": "min", "ideal": 2, "reservation": 4, "weight": 0.12}
+  },
+  "categorical": {
+    "genre": {
+      "weight": 0.20,
+      "values": {"invaders": 1.0, "breakout": 0.5, "snake": 0.3, "maze": 0.1}
+    },
+    "win_condition": {
+      "weight": 0.08,
+      "values": {"survive": 1.0, "clear": 0.9, "score": 0.6}
+    },
+    "reliability": {
+      "weight": 0.06,
+      "values": {
+        "deterministic": 1.0,
+        "declared_nondeterministic": 0.5,
+        "undeclared_nondeterministic": 0.0
+      }
+    }
+  }
+}
