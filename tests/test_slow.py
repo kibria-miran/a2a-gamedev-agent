@@ -232,11 +232,19 @@ def build_parts(task: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
-def accept_message(message_id: str, round_number: int, task_id: str) -> dict[str, Any]:
+def accept_message(
+    message_id: str,
+    round_number: int,
+    task_id: str,
+    build: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    data: dict[str, Any] = {"type": "accept", "round": round_number}
+    if build is not None:
+        data["build"] = build
     payload: dict[str, Any] = {
         "messageId": message_id,
         "role": "ROLE_USER",
-        "parts": [protocol.data_part({"type": "accept", "round": round_number})],
+        "parts": [protocol.data_part(data)],
         "taskId": task_id,
     }
     return payload
@@ -306,17 +314,17 @@ def test_s9_kill9_midbuild_restart_resumes(tmp_path: Path, fake_nim: FakeNIM) ->
         builds = build_parts(resumed_task)
         assert len(builds) == 1, builds
 
+        artifact = builds[0]["artifact"]
         accepted = rpc(
             coder.url,
             "SendMessage",
-            {"message": accept_message("mC", 3, task_id)},
+            {"message": accept_message("mC", 3, task_id, build=artifact)},
             CRITIC_TOKEN,
         )
         assert "error" not in accepted, accepted
         final = accepted["result"]["task"]
         assert final["status"]["state"] == "TASK_STATE_COMPLETED"
 
-        artifact = builds[0]["artifact"]
         with httpx.Client(base_url=coder.url, timeout=15.0) as client:
             fetched = client.get(
                 f"/tasks/{task_id}/build/{artifact['artifactId']}",
@@ -424,10 +432,13 @@ def test_s10b_accept_during_build_turn_gets_busy(tmp_path: Path, fake_nim: FakeN
         asyncio.run(both())
 
         # The task is input-required once the build lands.
+        task = rpc(coder.url, "GetTask", {"id": task_id}, DESIGNER_TOKEN)["result"]
+        builds = build_parts(task)
+        assert len(builds) == 1, builds
         resumed = rpc(
             coder.url,
             "SendMessage",
-            {"message": accept_message("mD", 3, task_id)},
+            {"message": accept_message("mD", 3, task_id, build=builds[0]["artifact"])},
             CRITIC_TOKEN,
         )
         assert "error" not in resumed, resumed

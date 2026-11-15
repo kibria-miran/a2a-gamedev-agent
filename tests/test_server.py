@@ -6,8 +6,11 @@ uses a real BuildResult from sandbox.build_game so the handoff artifact is
 real bytes.
 """
 
+import asyncio
 import hashlib
 import json
+import threading
+import time
 import uuid
 
 import httpx
@@ -346,6 +349,102 @@ async def test_full_spec_lifecycle_ends_in_completed(store):
         body = response.json()
         assert "error" not in body, body
         assert body["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+
+
+async def test_r10_accept_must_match_the_stored_build(store):
+    """R10: an accept names the build it reviewed; anything else is a fault."""
+
+    build_result = fake_build_result()
+    responder = ScriptedResponder(
+        counter_decision(round_number=1),
+        decision.Decision(kind="build", round=3, build_result=build_result, source="code"),
+    )
+    app = server.create_app(store, responder=responder,
+                            designer_token=DESIGNER, critic_token=CRITIC)
+
+    async with make_client(app, token=DESIGNER) as designer:
+        response = await send_offer(designer, round_number=0)
+        task_id = response.json()["result"]["task"]["id"]
+        response = await send(designer, message_dict(
+            role="user", parts=spec_signed_parts(2, COUNTERED), task_id=task_id))
+        body = response.json()
+        assert "error" not in body, body
+        build_data = [
+            p["data"] for p in body["result"]["task"]["history"][-1]["parts"]
+            if "data" in p and p["data"]["type"] == "build"
+        ][0]
+        artifact = build_data["artifact"]
+
+    good = {
+        "artifactId": artifact["artifactId"],
+        "sha256": artifact["sha256"],
+        "size": artifact["size"],
+    }
+    async with make_client(app, token=CRITIC) as critic:
+        bad_builds = [
+            {**good, "artifactId": artifact["artifactId"] + "-other"},
+            {**good, "sha256": "0" * 64},
+            {"artifactId": artifact["artifactId"]},          # no sha256
+            {**good, "size": artifact["size"] + 1},
+            None,                                            # no build at all
+        ]
+        for bad in bad_builds:
+            response = await send(critic, message_dict(
+                role="user", parts=accept_parts(3, build=bad), task_id=task_id))
+            assert response.json()["error"]["message"] == "accept mismatch", bad
+
+        # The round on the accept is the task's round, not a spec increment.
+        response = await send(critic, message_dict(
+            role="user", parts=accept_parts(2, build=good), task_id=task_id))
+        assert response.json()["error"]["message"] == "accept mismatch"
+
+        response = await send(critic, message_dict(
+            role="user", parts=accept_parts(3, build=good), task_id=task_id))
+        body = response.json()
+        assert "error" not in body, body
+        assert body["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+
+
+async def test_return_immediately_returns_working_without_waiting(store):
+    """SendMessageConfiguration.returnImmediately must not block on the turn."""
+
+    release = threading.Event()
+
+    def slow_responder(view, incoming, history):
+        release.wait(timeout=2)
+        return decision.Decision(
+            kind="counter", terms=COUNTERED,
+            round=int(incoming.get("round", 0)) + 1,
+            own_u=0.5, source="code",
+        )
+
+    app = server.create_app(store, responder=slow_responder,
+                            designer_token=DESIGNER, critic_token=CRITIC)
+
+    async with make_client(app, token=DESIGNER) as client:
+        started = time.monotonic()
+        response = await client.post("/", json={
+            "jsonrpc": "2.0", "id": "1", "method": "SendMessage",
+            "params": {
+                "message": offer_msg(round_number=0),
+                "configuration": {"returnImmediately": True},
+            },
+        })
+        elapsed = time.monotonic() - started
+        body = response.json()
+        assert "error" not in body, body
+        assert body["result"]["task"]["status"]["state"] == "TASK_STATE_WORKING"
+        assert elapsed < 1.0
+        task_id = body["result"]["task"]["id"]
+
+        release.set()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            task = await get_task(client, task_id)
+            if task["status"]["state"] != "TASK_STATE_WORKING":
+                break
+            await asyncio.sleep(0.01)
+        assert task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
 
 
 async def test_r20_unknown_artifact_is_not_found(app):

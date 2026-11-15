@@ -273,6 +273,27 @@ def test_source_tar_contains_game_sources_only():
     assert names == ["main.cpp"]
 
 
+@pytest.mark.parametrize("name", [
+    "../escape.cpp",
+    "/tmp/escape.cpp",
+    "sub/../../escape.cpp",
+    "./escape.cpp",
+    "harness.h",
+    "harness.c",
+])
+def test_build_rejects_unsafe_source_names(name):
+    result = sandbox.build_game({name: COUNTER_GAME})
+    assert not result.ok
+    assert any("unsafe path" in violation for violation in result.violations)
+
+
+def test_build_never_writes_outside_the_sandbox(tmp_path):
+    target = tmp_path / "escaped.cpp"
+    result = sandbox.build_game({str(target): COUNTER_GAME})
+    assert not result.ok
+    assert not target.exists()
+
+
 def test_binary_and_tar_are_deterministic_in_sha():
     r1 = sandbox.build_game({"main.cpp": COUNTER_GAME})
     r2 = sandbox.build_game({"main.cpp": COUNTER_GAME})

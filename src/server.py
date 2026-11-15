@@ -259,7 +259,7 @@ def create_app(
 
     async def _send_message(params: dict[str, Any] | None, role: str) -> dict[str, Any]:
         try:
-            message, offer, _blocking = _validate_send_params(params, role)
+            message, offer, blocking = _validate_send_params(params, role)
         except RpcFault:
             trace.trace("offer", direction="in", agent=app.state.trace_agent,
                         severity="error", error_kind="bad_params")
@@ -271,7 +271,7 @@ def create_app(
             if stored is not None:
                 async with store.lock_for(stored["task_id"]):
                     outcome = _handle_existing(stored["task_id"], message, offer, role)
-                return await _finish(outcome)
+                return await _finish(outcome, blocking)
 
             # taskless walk_away/accept cannot open a task (R12b)
             if offer["type"] in {"accept", "walk_away"}:
@@ -287,18 +287,27 @@ def create_app(
                     raise _fault(config.JSONRPC_INVALID_PARAMS, config.REASONS["R4"], kind="server_busy", severity="info")
                 task = store.create_task(message.contextId)
                 outcome = _begin_turn(task["id"], message, offer, role)
-            return await _finish(outcome)
+            return await _finish(outcome, blocking)
 
         if store.get_task(task_id) is None:
             raise _fault(config.A2A_TASK_NOT_FOUND, "task not found")
 
         async with store.lock_for(task_id):
             outcome = _handle_existing(task_id, message, offer, role)
-        return await _finish(outcome)
+        return await _finish(outcome, blocking)
 
-    async def _finish(outcome: dict[str, Any] | StartedTurn) -> dict[str, Any]:
+    async def _finish(
+        outcome: dict[str, Any] | StartedTurn, blocking: bool
+    ) -> dict[str, Any]:
         if isinstance(outcome, StartedTurn):
-            return await _await_turn(outcome)
+            # A2A SendMessageConfiguration.returnImmediately: hand back the
+            # committed snapshot (usually TASK_STATE_WORKING) instead of
+            # waiting for the background turn. The client then polls GetTask.
+            if blocking:
+                return await _await_turn(outcome)
+            view = store.task_view(outcome.task_id)
+            assert view is not None
+            return view
         return outcome
 
     def _handle_existing(
@@ -372,6 +381,11 @@ def create_app(
 
         # accept: critic completes the task (E-66; no terms, no agreement artifact).
         if offer["type"] == "accept":
+            # R10: the accept must name the build that was actually produced,
+            # at the task's current round. Terms don't exist here; the build
+            # descriptor (artifactId + sha256, optional size) is the artifact
+            # under acceptance, so a mismatched accept is a protocol fault.
+            _check_accept_matches_build(task_id, offer, task)
             store.complete_with_accept(
                 task_id, None,
                 message_id=message.messageId,
@@ -401,6 +415,37 @@ def create_app(
             return _begin_turn(task_id, message, offer, role)
 
         raise _fault(config.JSONRPC_INVALID_PARAMS, config.REASONS["R8"], kind="bad_params")
+
+    def _check_accept_matches_build(
+        task_id: str, offer: dict[str, Any], task: dict[str, Any]
+    ) -> None:
+        build = offer.get("build")
+        last_agent = store.last_message(task_id, "agent")
+        last_data, _ = (
+            protocol.split_parts(last_agent["parts"]) if last_agent is not None else (None, None)
+        )
+        artifact = (
+            last_data.get("artifact")
+            if isinstance(last_data, dict) and last_data.get("type") == "build"
+            else None
+        )
+
+        mismatch = not isinstance(build, dict) or not isinstance(artifact, dict)
+        if isinstance(build, dict) and isinstance(artifact, dict):
+            mismatch = (
+                str(build.get("artifactId", "")) != str(artifact.get("artifactId", ""))
+                or not artifact.get("sha256")
+                or str(build.get("sha256", "")) != str(artifact.get("sha256"))
+                or int(offer["round"]) != int(task["round"])
+            )
+            if not mismatch and "size" in build:
+                mismatch = str(build.get("size")) != str(artifact.get("size"))
+
+        if mismatch:
+            trace.trace("accept", direction="in", agent=app.state.trace_agent,
+                        task_id=task_id, round=int(offer["round"]),
+                        severity="error", error_kind="bad_params")
+            raise _fault(config.JSONRPC_INVALID_PARAMS, config.REASONS["R10"], kind="bad_params")
 
     def _decision_rows(task: dict[str, Any], offer: dict[str, Any], role: str) -> None:
         type_ = offer["type"]

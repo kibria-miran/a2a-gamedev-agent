@@ -17,6 +17,11 @@ points.
 | `GetTask` | Fetch the task view. `historyLength` clamped server-side. |
 | `CancelTask` | Cancel a non-terminal task. Idempotent if already canceled. |
 
+`SendMessage` honours `configuration.returnImmediately: true` (and the legacy
+`configuration.blocking: false`): the call returns the committed snapshot
+(usually `TASK_STATE_WORKING`) without waiting for the background turn, and
+the client polls `GetTask`. The default blocks up to `BLOCKING_TIMEOUT`.
+
 JSON-RPC 2.0 envelope. Errors: `-32700` parse, `-32600` invalid request,
 `-32601` method not found, `-32602` invalid params, `-32603` internal,
 `-32001` task/artifact not found, `-32002` task not cancelable.
@@ -83,6 +88,11 @@ task → R6a/b/c/d replay/turn-in-progress → R7 terminal → R8 busy turn → 
 round mismatch → R10 accept mismatch → **R17 spec_signed not from designer
 → R18 build before spec_signed → R19 accept not from critic or before
 signoff → R20 artifact not found** → R21 spec message not from designer.
+
+R10 ("accept mismatch") compares the accept's `build` descriptor against the
+last stored `build` message: `artifactId` and `sha256` must match, `size` when
+present must match, and `round` must equal `tasks.round`. A missing or
+mismatched descriptor is `-32602`.
 
 `ALREADY_SIGNED` (`-32602`, "spec already signed") is the E-68 guard layered on
 top of those rows: once a task has `spec_signed`, another `spec_signed` is

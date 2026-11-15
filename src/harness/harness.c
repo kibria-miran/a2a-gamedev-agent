@@ -76,8 +76,11 @@ static uint32_t fnv1a32(const unsigned char* data, size_t n) {
 /* ---------- spec JSON loading ---------- */
 
 static char* read_all_fd(int fd, size_t cap, size_t* out_len, int* overflowed) {
+    /* bufcap counts data bytes; the allocation always reserves one extra byte
+       for the NUL terminator, so a buffer filled to the cap stays in bounds. */
     size_t len = 0, bufcap = 1 << 16;
-    char* buf = (char*)malloc(bufcap);
+    if (bufcap > cap) bufcap = cap;
+    char* buf = (char*)malloc(bufcap + 1);
     if (!buf) return NULL;
     for (;;) {
         if (len == bufcap) {
@@ -85,10 +88,12 @@ static char* read_all_fd(int fd, size_t cap, size_t* out_len, int* overflowed) {
                 if (overflowed) *overflowed = 1;
                 break;
             }
-            bufcap *= 2;
-            char* grown = (char*)realloc(buf, bufcap);
+            size_t grown_cap = bufcap * 2;
+            if (grown_cap > cap) grown_cap = cap;
+            char* grown = (char*)realloc(buf, grown_cap + 1);
             if (!grown) { free(buf); return NULL; }
             buf = grown;
+            bufcap = grown_cap;
         }
         ssize_t n = read(fd, buf + len, bufcap - len);
         if (n <= 0) break;

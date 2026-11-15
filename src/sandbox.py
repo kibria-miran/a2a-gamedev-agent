@@ -232,6 +232,15 @@ def _drain_pipe(stream, limit: int, sink: list[bytes], overflow: threading.Event
     sink.append(bytes(buf))
 
 
+def _feed_stdin(pipe, data: bytes) -> None:
+    """Best-effort stdin delivery; the child may exit or stop reading."""
+
+    with suppress(BrokenPipeError, OSError):
+        pipe.write(data)
+    with suppress(OSError):
+        pipe.close()
+
+
 def _run(argv: list[str], *, stdin: bytes | None = None, env: dict[str, str] | None = None,
          timeout: float, backend: str, work_dir: Path | None = None,
          text: bool = False) -> _CapturedProcess:
@@ -258,22 +267,43 @@ def _run(argv: list[str], *, stdin: bytes | None = None, env: dict[str, str] | N
     for thread in threads:
         thread.start()
 
+    # Feed stdin from a thread: a child that never reads (or a tape larger
+    # than the pipe buffer) must not block the parent before proc.wait()'s
+    # timeout can fire.
+    feeder: threading.Thread | None = None
     if stdin is not None:
         assert proc.stdin is not None
-        with suppress(BrokenPipeError, OSError):
-            proc.stdin.write(stdin)
-    if proc.stdin is not None:
+        feeder = threading.Thread(target=_feed_stdin, args=(proc.stdin, stdin), daemon=True)
+        feeder.start()
+    elif proc.stdin is not None:
         with suppress(OSError):
             proc.stdin.close()
 
+    deadline = time.monotonic() + timeout
     try:
-        returncode = proc.wait(timeout=timeout)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(wrapped, timeout)
+            try:
+                returncode = proc.wait(timeout=min(remaining, 0.05))
+                break
+            except subprocess.TimeoutExpired:
+                # E-70/S24: stop a spammer as soon as the cap is breached
+                # instead of letting it run to the wall-clock timeout.
+                if overflow.is_set():
+                    proc.kill()
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+        if feeder is not None:
+            feeder.join(timeout=5)
         for thread in threads:
             thread.join(timeout=5)
         raise subprocess.TimeoutExpired(wrapped, timeout) from None
+
+    if feeder is not None:
+        feeder.join(timeout=5)
     for thread in threads:
         thread.join(timeout=10)
 
@@ -440,10 +470,28 @@ def scan_banned_calls(sources: dict[str, str]) -> tuple[str, ...]:
     return tuple(violations)
 
 
+_RESERVED_SOURCE_NAMES = frozenset({"harness.c", "harness.h"})
+
+
+def _unsafe_source_name(name: str) -> bool:
+    """Reject names that would escape the work dir or shadow generated files."""
+
+    if not name or "\x00" in name or "\\" in name:
+        return True
+    if name in _RESERVED_SOURCE_NAMES:
+        return True
+    if Path(name).is_absolute():
+        return True
+    return any(part in {"", ".", ".."} for part in name.split("/"))
+
+
 def _preflight(sources: dict[str, str]) -> tuple[tuple[str, ...], DeterminismScan]:
     violations: list[str] = []
     total = 0
     for name, text in sources.items():
+        if _unsafe_source_name(name):
+            violations.append(f"source:unsafe path {name!r}")
+            continue
         total += len(text.encode("utf-8"))
         if len(text.encode("utf-8")) > MAX_SOURCE_FILE_BYTES:
             violations.append(f"source:{name} exceeds 1 MiB")
