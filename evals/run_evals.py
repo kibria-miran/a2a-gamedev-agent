@@ -409,13 +409,16 @@ def run_x3(mode: str, runs: int, *, designer_model: str | None = None,
     """Coder rationale on the wire vs suppressed (live only).
 
     Machine-checked: no rationale on the wire may contain a leak phrase;
-    the agreement rate is reported for both arms.
+    the agreement rate is reported for both arms. Exits nonzero if the
+    rationale_on arm leaks in any run — publishing rationale on the wire
+    is gated on zero leaks.
     """
 
     if mode != "live":
         raise SystemExit("X3 needs a real proposer; use --mode live with NIM keys")
     _require_live(designer_model, coder_model)
     results: list[RunResult] = []
+    arm_leaks: dict[str, list[str]] = {}
     for label, enabled in (("rationale_on", True), ("rationale_off", False)):
         arm = _run_arm(
             "x3", label, "live", runs,
@@ -425,6 +428,7 @@ def run_x3(mode: str, runs: int, *, designer_model: str | None = None,
         )
         results += arm
         leaks, leaky = _leak_detail(arm)
+        arm_leaks[label] = leaky
         if leaky:
             more = f" (+{len(leaky) - 5} more)" if len(leaky) > 5 else ""
             verdict = f"FAIL ({len(leaky)}/{len(arm)} runs leaked: {', '.join(leaky[:5])}{more})"
@@ -434,6 +438,13 @@ def run_x3(mode: str, runs: int, *, designer_model: str | None = None,
         summarize(f"X3 arm={label} (live)", arm)
     out = write_jsonl(mode, results, name="x3-rationale")
     print(f"saved {out}")
+    leaked = arm_leaks.get("rationale_on", [])
+    if leaked:
+        # Live gate: publishing rationale on the wire with a leak in it is a
+        # hard failure, not a warning — nonzero exit, offending ids listed.
+        raise SystemExit(
+            f"X3 leak gate failed: rationale_on leaked in runs: {', '.join(leaked)}"
+        )
     return results
 
 

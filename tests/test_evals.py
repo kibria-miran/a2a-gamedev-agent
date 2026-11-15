@@ -153,3 +153,44 @@ def test_summarize_reports_per_run_leaks(capsys: pytest.CaptureFixture[str]) -> 
     assert "wire leaks: 3 over 4 runs" in out
     assert "worst single run: 2" in out
     assert "leaking runs: run-1, run-3" in out
+
+
+
+def _fake_arm(experiment, label, mode, runs, wire_leaks=0):
+    from evals.run_evals import RunResult
+
+    return [
+        RunResult(experiment=experiment, mode=mode, run_id=f"{label}-{i}", outcome="completed",
+                  terms=None, rounds=1, designer_u=0.5, coder_u=0.5, joint_u=1.0,
+                  nash_product=0.25, surplus_fairness=0.5, builds=1,
+                  latency_s=0.1, source="live", wire_leaks=wire_leaks)
+        for i in range(runs)
+    ]
+
+
+def test_x3_leak_gate_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A leaked rationale on the wire must exit non-zero with the offending ids."""
+    monkeypatch.setattr(run_evals, "RESULTS", tmp_path)
+    monkeypatch.setattr(run_evals, "_require_live", lambda *a, **k: None)
+    monkeypatch.setattr(run_evals.llm, "default_chat", lambda *a, **k: object())
+
+    def leaky_arm(experiment, label, mode, runs, **kwargs):
+        return _fake_arm(experiment, label, mode, runs,
+                         wire_leaks=2 if label == "rationale_on" else 0)
+
+    monkeypatch.setattr(run_evals, "_run_arm", leaky_arm)
+    with pytest.raises(SystemExit, match="rationale_on"):
+        run_evals.run_x3("live", 2)
+
+
+def test_x3_leak_gate_passes_when_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(run_evals, "RESULTS", tmp_path)
+    monkeypatch.setattr(run_evals, "_require_live", lambda *a, **k: None)
+    monkeypatch.setattr(run_evals.llm, "default_chat", lambda *a, **k: object())
+
+    def clean_arm(experiment, label, mode, runs, **kwargs):
+        return _fake_arm(experiment, label, mode, runs, wire_leaks=0)
+
+    monkeypatch.setattr(run_evals, "_run_arm", clean_arm)
+    results = run_evals.run_x3("live", 2)
+    assert len(results) == 4
